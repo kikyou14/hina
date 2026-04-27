@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="zh">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" href="/api/public/favicon" />
+    <link rel="apple-touch-icon" href="/icon/apple-touch-icon.png" />
+    <link rel="manifest" href="/icon/site.webmanifest" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="light dark" />
+    <meta name="theme-color" content="#f6f7f9" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#1f2026" media="(prefers-color-scheme: dark)" />
+    <meta name="robots" content="noindex, nofollow" />
+    <title>Hina</title>
+    <script>
+      (function () {
+        var root = document.documentElement;
+        function apply(mode) {
+          root.classList.add(mode);
+          root.style.colorScheme = mode;
+        }
+        function systemPref() {
+          try {
+            return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+          } catch (_) {
+            return "light";
+          }
+        }
+        try {
+          var stored = localStorage.getItem("hina.theme");
+          var theme =
+            stored === "dark" || stored === "light" || stored === "system" ? stored : "system";
+          apply(theme === "system" ? systemPref() : theme);
+        } catch (_) {
+          apply(systemPref());
+        }
+        try {
+          var lang = localStorage.getItem("hina-language");
+          if (lang === "zh" || lang === "en") root.lang = lang;
+        } catch (_) {}
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

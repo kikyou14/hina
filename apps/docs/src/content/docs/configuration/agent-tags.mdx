@@ -1,0 +1,72 @@
+---
+title: Agent 标签
+description: 自定义 Agent 标签的样式、颜色和图标
+---
+
+import { ColorPalette, IconGallery, TagExamples } from "../../../components/TagShowcase";
+
+标签用于对 Agent 进行分类和标记。每个 Agent 可以拥有多个标签，标签会显示在管理后台和公开状态页中。
+
+## 语法格式
+
+```
+名称<颜色,图标>
+```
+
+- **名称**（必填）：标签显示的文本。
+- **颜色**（可选）：从预设色板中选择，默认为 `blue`。
+- **图标**（可选）：从预设图标中选择，默认为 `tag`。
+
+颜色和图标均为可选，以下写法都是合法的：
+
+| 输入                  | 效果                               |
+| --------------------- | ---------------------------------- |
+| `Production`          | 文本 "Production"，蓝色，tag 图标  |
+| `CN2<green>`          | 文本 "CN2"，绿色，tag 图标         |
+| `DB<violet,database>` | 文本 "DB"，紫罗兰色，database 图标 |
+
+批量添加时使用**英文分号**分隔多个标签，例如：
+
+```
+CN2<blue,route>; NAT<orange>; Primary<green,star>
+```
+
+## 使用示例
+
+<TagExamples
+  tags={[
+    "Production<green,shield>",
+    "Staging<amber,rocket>",
+    "CN2 GIA<blue,route>",
+    "Database<violet,database>",
+    "US-West<cyan,globe>",
+    "GPU<orange,chip>",
+    "Primary<teal,star>",
+    "Backup<gray,server>",
+  ]}
+/>
+
+上面的标签分别通过以下输入生成：
+
+```
+Production<green,shield>
+Staging<amber,rocket>
+CN2 GIA<blue,route>
+Database<violet,database>
+US-West<cyan,globe>
+GPU<orange,chip>
+Primary<teal,star>
+Backup<gray,server>
+```
+
+## 可用颜色
+
+共 26 种预设颜色，名称参考 [Radix UI](https://www.radix-ui.com/colors) 色板。
+
+<ColorPalette />
+
+## 可用图标
+
+共 20 种预设图标，来自 [HugeIcons](https://hugeicons.com/) 图标库。
+
+<IconGallery />

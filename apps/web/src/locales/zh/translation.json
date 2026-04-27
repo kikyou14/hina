@@ -1,0 +1,845 @@
+{
+  "common": {
+    "loading": "加载中...",
+    "refresh": "刷新",
+    "save": "保存",
+    "saving": "保存中...",
+    "retry": "重试",
+    "create": "创建",
+    "creating": "创建中...",
+    "edit": "编辑",
+    "delete": "删除",
+    "copy": "复制",
+    "copied": "已复制到剪贴板",
+    "copyFailed": "复制失败",
+    "dismiss": "关闭",
+    "cancel": "取消",
+    "confirm": "确认",
+    "confirmDelete": "确认删除",
+    "search": "搜索",
+    "clear": "清除",
+    "all": "全部",
+    "true": "是",
+    "false": "否",
+    "enable": "启用",
+    "enabled": "已启用",
+    "disabled": "已禁用",
+    "public": "公开",
+    "private": "私有",
+    "online": "在线",
+    "offline": "离线",
+    "name": "名称",
+    "type": "类型",
+    "failedToLoad": "加载失败",
+    "requestFailed": "请求失败",
+    "toggleTheme": "切换主题",
+    "switchLanguage": "切换语言",
+    "adminPortal": "管理入口",
+    "logout": "登出",
+    "showPassword": "显示密码",
+    "hidePassword": "隐藏密码",
+    "theme": {
+      "light": "浅色",
+      "dark": "深色",
+      "system": "跟随系统"
+    },
+    "noData": "无数据",
+    "optional": "可选",
+    "test": "测试",
+    "error": "操作失败",
+    "errors": {
+      "requestFailed": "请求失败。",
+      "loadFailed": "无法加载数据。",
+      "loadDescription": "数据暂时无法加载，可以稍后重试。",
+      "createFailed": "无法创建项目。",
+      "saveFailed": "无法保存更改。",
+      "updateFailed": "无法更新项目。",
+      "deleteFailed": "无法删除项目。",
+      "testFailed": "无法完成测试。",
+      "network": "网络连接失败，请检查连接后重试。",
+      "unauthorized": "登录状态已过期，请重新登录后再试。",
+      "forbidden": "你没有权限执行此操作。",
+      "notFound": "请求的资源已不可用。",
+      "conflict": "内容已被其他操作修改，请刷新后重试。",
+      "payloadTooLarge": "请求内容过大，请减少内容后重试。",
+      "rateLimited": "操作过于频繁，请稍后再试。",
+      "server": "服务暂时不可用，请稍后重试。"
+    },
+    "errorBoundary": {
+      "title": "出现了一些问题",
+      "description": "发生了意外错误，请尝试重新加载页面。",
+      "reload": "重新加载"
+    },
+    "pagination": {
+      "rangeOfTotal": "{{start}}-{{end}} 条 / 共 {{total}} 条",
+      "previous": "上一页",
+      "next": "下一页",
+      "first": "首页",
+      "last": "末页",
+      "pageSize": "每页条数",
+      "pageSizeOption": "{{count}} 条 / 页"
+    }
+  },
+
+  "notFound": {
+    "title": "未找到",
+    "description": "您访问的页面不存在。",
+    "goHome": "返回首页"
+  },
+
+  "login": {
+    "title": "管理员登录",
+    "username": "用户名",
+    "password": "密码",
+    "signIn": "登录",
+    "signingIn": "登录中...",
+    "loginFailed": "登录失败。",
+    "invalidCredentials": "凭据无效。",
+    "rateLimited": "尝试次数过多，请稍后再试。"
+  },
+
+  "admin": {
+    "title": "管理",
+    "nav": {
+      "agents": "节点管理",
+      "probeTasks": "探测任务",
+      "alerts": "告警",
+      "auditLogins": "登录审计",
+      "account": "账户",
+      "settings": "设置"
+    },
+    "version": {}
+  },
+
+  "account": {
+    "title": "账户",
+    "errors": {
+      "invalidCredentials": "账号或密码错误。",
+      "invalidUsername": "用户名不合法。",
+      "invalidPassword": "密码不合法。",
+      "usernameTaken": "用户名已被占用。"
+    },
+    "username": {
+      "title": "修改用户名",
+      "newUsername": "新用户名",
+      "currentPassword": "当前密码",
+      "submit": "更新用户名",
+      "updating": "更新中...",
+      "success": "用户名已更新。"
+    },
+    "password": {
+      "title": "修改密码",
+      "currentPassword": "当前密码",
+      "newPassword": "新密码",
+      "confirmPassword": "确认新密码",
+      "submit": "更新密码",
+      "updating": "更新中...",
+      "mismatch": "两次输入的密码不一致。",
+      "success": "密码已更新，请重新登录。"
+    }
+  },
+
+  "agents": {
+    "title": "节点",
+    "createAgent": "创建节点",
+    "createDialog": {
+      "title": "创建节点"
+    },
+    "tokenCard": {
+      "title": "节点令牌",
+      "description": "请妥善保管此令牌，令牌不可恢复。"
+    },
+    "filters": {
+      "tags": "标签",
+      "enabled": "启用"
+    },
+    "table": {
+      "status": "状态",
+      "name": "名称",
+      "group": "分组",
+      "ip": "IP",
+      "flags": "标志",
+      "actions": "操作",
+      "over": "超额"
+    },
+    "shownTotal": "已显示 {{shown}} / 共 {{total}} 个",
+    "editDialog": {
+      "title": "编辑节点"
+    },
+    "billingDialog": {
+      "title": "流量计费"
+    },
+    "billing": {
+      "quota": "配额",
+      "unlimitedPlaceholder": "0 = 不限",
+      "mode": "模式",
+      "modeSum": "总和 (下载 + 上传)",
+      "modeRx": "仅下载",
+      "modeTx": "仅上传",
+      "modeMax": "取最大值 (max(下载, 上传))",
+      "resetDay": "重置日 (UTC)",
+      "resetDayPlaceholder": "1..31",
+      "invalidQuota": "无效的配额值。",
+      "resetDayError": "重置日必须在 1 至 31 之间。"
+    },
+    "rotateToken": "轮换令牌",
+    "rotateConfirm": "确定要轮换令牌吗？现有节点令牌将失效。",
+    "deleteConfirm": "确定要删除节点吗？此操作不可恢复，并将删除该节点的所有历史数据。",
+    "deleteFailed": "删除节点失败。",
+    "reorderFailed": "保存排序失败。",
+    "dragToReorder": "拖动排序",
+    "form": {
+      "groupByName": "分组（按名称）",
+      "note": "备注",
+      "createFailed": "创建失败。",
+      "updateFailed": "更新失败。"
+    },
+    "tags": {
+      "add": "添加标签",
+      "addButton": "添加",
+      "remove": "删除 {{tag}}"
+    },
+    "pricing": {
+      "title": "定价",
+      "currency": "货币",
+      "cycle": "计费周期",
+      "amount": "金额 (0 = 免费)",
+      "expiresAt": "到期时间",
+      "invalidAmount": "无效的金额。",
+      "currencies": {
+        "CNY": "CNY (¥)",
+        "USD": "USD ($)",
+        "EUR": "EUR (€)",
+        "GBP": "GBP (£)",
+        "CHF": "CHF (Fr)"
+      },
+      "cycles": {
+        "monthly": "月付",
+        "quarterly": "季付",
+        "semiannual": "半年付",
+        "annual": "年付",
+        "biennial": "两年付",
+        "triennial": "三年付",
+        "lifetime": "永久"
+      }
+    },
+    "deploy": {
+      "button": "部署",
+      "title": "部署 {{name}}",
+      "token": "令牌",
+      "tokenUnavailable": "令牌不可恢复，请轮换以生成新令牌。",
+      "serverUrl": "服务器地址",
+      "agentOptions": "节点选项",
+      "interface": "网络接口",
+      "interfacePlaceholder": "例如 eth0",
+      "mountPoints": "挂载点",
+      "mountPointsPlaceholder": "例如 /,/data",
+      "installOptions": "安装选项",
+      "downloadProxy": "下载代理",
+      "downloadProxyPlaceholder": "例如 https://ghproxy.com/",
+      "serviceName": "服务名称",
+      "installDir": "安装目录",
+      "installCommand": "安装命令",
+      "noTokenHint": "请先轮换令牌以生成安装命令。",
+      "copyCommand": "复制命令"
+    }
+  },
+
+  "alerts": {
+    "title": "告警",
+    "tabs": {
+      "active": "活跃",
+      "notifications": "通知"
+    },
+    "active": {
+      "title": "活跃告警",
+      "count": "{{count}} 个活跃",
+      "severity": "严重级别",
+      "rule": "规则",
+      "kind": "类型",
+      "agent": "节点",
+      "activeSince": "活跃时间",
+      "value": "值"
+    },
+    "notifications": {
+      "title": "通知发件箱",
+      "count": "{{count}} 条",
+      "allStatuses": "全部状态",
+      "status": "状态",
+      "kind": "类型",
+      "firing": "触发",
+      "recovered": "恢复",
+      "rule": "规则",
+      "channel": "渠道",
+      "event": "事件",
+      "error": "错误",
+      "statuses": {
+        "pending": "待发送",
+        "sent": "已发送",
+        "dead": "失败"
+      }
+    },
+    "severities": {
+      "info": "信息",
+      "warning": "警告",
+      "critical": "严重"
+    },
+    "kinds": {
+      "agent_offline": "节点离线",
+      "metric_threshold": "指标阈值",
+      "probe_failed": "探测失败",
+      "probe_latency": "探测延迟",
+      "quota_exceeded": "配额超限",
+      "agent_expiring": "节点到期",
+      "route_change": "路由变更 (beta)"
+    }
+  },
+
+  "audit": {
+    "logins": {
+      "title": "登录审计",
+      "limit": "限制",
+      "prev": "上一页",
+      "next": "下一页",
+      "noLogs": "暂无登录尝试记录。",
+      "filter": {
+        "all": "全部",
+        "failures": "仅失败"
+      },
+      "table": {
+        "time": "时间",
+        "result": "结果",
+        "reason": "原因",
+        "username": "用户名",
+        "ip": "IP"
+      },
+      "result": {
+        "success": "成功",
+        "failure": "失败"
+      },
+      "reason": {
+        "ok": "登录成功",
+        "no_user": "用户不存在",
+        "bad_password": "密码错误"
+      }
+    }
+  },
+
+  "logs": {
+    "title": "服务器日志",
+    "auto": "自动",
+    "stick": "固定底部",
+    "noLogs": "暂无日志。",
+    "failedToLoad": "加载日志失败。"
+  },
+
+  "scope": {
+    "label": "适用范围",
+    "modes": {
+      "all": "全部节点",
+      "groups": "按分组",
+      "specific": "指定节点"
+    },
+    "allDescription": "应用于所有节点，包括新添加的节点。",
+    "noGroups": "暂无分组，请先在节点管理页面创建分组。",
+    "agentCount": "{{count}} 个节点"
+  },
+
+  "probes": {
+    "title": "探测任务",
+    "createTask": "创建任务",
+    "createDialog": {
+      "title": "创建探测任务"
+    },
+    "editDialog": {
+      "title": "编辑探测任务"
+    },
+    "filters": {
+      "title": "筛选",
+      "description": "按名称/类型/启用状态筛选任务。",
+      "taskNamePlaceholder": "搜索任务名称",
+      "kind": "类型"
+    },
+    "table": {
+      "name": "名称",
+      "kind": "类型",
+      "target": "目标",
+      "interval": "间隔",
+      "scope": "范围",
+      "status": "状态",
+      "actions": "操作",
+      "groups": "分组: {{count}}",
+      "agents": "{{count}} 个节点",
+      "results": "结果"
+    },
+    "form": {
+      "intervalSec": "间隔 (秒)",
+      "timeoutMs": "超时 (毫秒)",
+      "target": "目标",
+      "host": "主机",
+      "port": "端口",
+      "url": "URL",
+      "scope": "范围",
+      "scopeDescription": "至少选择一个分组或节点。",
+      "groups": "分组",
+      "agents": "节点",
+      "noGroups": "暂无分组",
+      "filterAgents": "筛选节点...",
+      "traceRevealHopDetails": "对外显示每跳详情",
+      "traceRevealHopDetailsDescription": "启用后，对访客显示每跳 IP、hostname 和 ASN。",
+      "invalidInterval": "无效的间隔值。",
+      "invalidTimeout": "无效的超时值。",
+      "missingTarget": "缺少目标。",
+      "invalidHost": "无效的主机地址：必须是合法的域名或 IP 地址。",
+      "invalidPort": "无效的端口号：必须是 1–65535。",
+      "invalidUrl": "无效的 URL：必须以 http:// 或 https:// 开头。",
+      "tracerouteIpv6NotSupported": "Traceroute 仅支持 IPv4 目标（不支持 IPv6）。",
+      "missingScope": "缺少范围：请至少选择一个分组或节点。",
+      "requestFailed": "请求失败。"
+    },
+    "deleteConfirm": "确定要删除此任务吗？",
+    "deleteFailed": "删除任务失败。",
+    "reorderFailed": "保存排序失败。"
+  },
+
+  "probeResults": {
+    "detail": {
+      "rawJsonTitle": "原始 JSON",
+      "extraParseError": "解析 extra 失败，已展示原始 JSON。",
+      "unsupportedPayload": "不支持的探测类型或载荷，已展示原始 JSON。",
+      "completed": "已完成",
+      "incomplete": "未完成",
+      "hops": "{{count}} 跳",
+      "destination": "目标地址",
+      "route": "路由",
+      "requestTimedOut": "请求超时",
+      "hopsTimedOut": "{{count}} 跳超时",
+      "internalHops": "{{count}} 跳（内网）",
+      "networkPath": "网络路径",
+      "timeouts": "超时"
+    }
+  },
+
+  "settings": {
+    "title": "设置",
+    "tabs": {
+      "channels": "渠道",
+      "rules": "规则",
+      "site": "界面设置",
+      "runtime": "Agent 运行时",
+      "general": "通用",
+      "logs": "日志"
+    },
+    "general": {
+      "title": "通用设置",
+      "siteConfig": {
+        "title": "站点配置"
+      },
+      "database": {
+        "title": "数据库"
+      },
+      "publicBaseUrl": {
+        "label": "站点公开地址",
+        "description": "用于告警通知中的 {{dashboard.url}} 变量，留空则不生成链接。",
+        "saveFailed": "保存站点公开地址失败。"
+      },
+      "sortOffline": {
+        "label": "将离线节点排到最后",
+        "saveFailed": "保存设置失败。"
+      },
+      "hideTraceroute": {
+        "label": "对访客隐藏路由跟踪",
+        "saveFailed": "保存设置失败。"
+      },
+      "asnDb": {
+        "label": "ASN 数据库 (GeoLite2-ASN)",
+        "statusLoaded": "已加载",
+        "statusNotLoaded": "未加载",
+        "noFile": "文件未找到",
+        "ageDays": "{{days}} 天 {{hours}} 小时前更新",
+        "ageHours": "{{hours}} 小时前更新",
+        "ageFresh": "刚刚更新",
+        "refresh": "立即更新",
+        "refreshing": "下载中...",
+        "refreshed": "ASN 数据库已更新。",
+        "refreshFailed": "ASN 数据库更新失败。"
+      },
+      "db": {
+        "label": "SQLite 数据库",
+        "dbSize": "数据库大小",
+        "walSize": "WAL 大小",
+        "freelistPages": "{{count}} 个可回收页",
+        "vacuum": "整理压缩",
+        "vacuuming": "压缩中...",
+        "vacuumed": "数据库压缩完成。",
+        "vacuumFailed": "数据库压缩失败。",
+        "vacuumConfirmTitle": "整理压缩数据库",
+        "vacuumConfirmDesc": "VACUUM 会重建整个数据库文件。操作期间所有读写请求将被阻塞，可能暂时影响 Agent 连接和 API 请求。",
+        "backup": "备份",
+        "backingUp": "备份中...",
+        "backupFailed": "数据库备份失败。",
+        "backupAlreadyPending": "已有一份备份等待下载，请先下载或等待其过期。",
+        "optimize": "优化",
+        "optimizing": "优化中...",
+        "optimized": "数据库优化完成。",
+        "optimizeFailed": "数据库优化失败。"
+      },
+      "versionCheck": {
+        "label": "版本",
+        "currentVersion": "当前版本",
+        "upToDate": "已是最新版本",
+        "autoCheck": "自动检查更新",
+        "autoCheckDescription": "定期从 GitHub 检查新版本。在隔离网络中部署时可关闭此选项。",
+        "saveFailed": "保存设置失败。"
+      }
+    },
+    "channels": {
+      "createChannel": "创建渠道",
+      "createDialog": {
+        "title": "创建渠道"
+      },
+      "editDialog": {
+        "title": "编辑渠道"
+      },
+      "table": {
+        "title": "告警渠道",
+        "count": "{{count}} 个渠道",
+        "name": "名称",
+        "type": "类型",
+        "status": "状态",
+        "config": "配置",
+        "updated": "更新时间",
+        "actions": "操作"
+      },
+      "testSent": "测试已发送。",
+      "testFailed": "测试失败。",
+      "deleteConfirm": "确定要删除此渠道吗？",
+      "deleteFailed": "删除渠道失败。"
+    },
+    "rules": {
+      "createRule": "创建规则",
+      "createDialog": {
+        "title": "创建规则"
+      },
+      "editDialog": {
+        "title": "编辑规则"
+      },
+      "table": {
+        "title": "告警规则",
+        "count": "{{count}} 条规则",
+        "name": "名称",
+        "severity": "严重级别",
+        "kind": "类型",
+        "status": "状态",
+        "delay": "延迟",
+        "channels": "渠道",
+        "updated": "更新时间",
+        "actions": "操作"
+      },
+      "deleteConfirm": "确定要删除此规则吗？",
+      "deleteFailed": "删除规则失败。"
+    },
+    "channelForm": {
+      "webhook": {
+        "title": "Webhook",
+        "description": "POST/PUT JSON 载荷，支持可选 HMAC 签名。",
+        "url": "URL",
+        "method": "方法",
+        "timeoutMs": "超时 (ms)",
+        "headersJson": "请求头 (JSON)",
+        "secret": "密钥（可选）",
+        "secretPlaceholder": "留空以保留现有值",
+        "invalidHeaders": "请求头 JSON 无效。"
+      },
+      "telegram": {
+        "title": "Telegram",
+        "description": "使用 Bot sendMessage API。",
+        "chatId": "Chat ID",
+        "botToken": "Bot Token",
+        "botTokenOptional": "Bot Token（可选）",
+        "threadId": "Thread ID（可选）",
+        "threadIdPlaceholder": "数字",
+        "disableNotification": "静默通知",
+        "keepPlaceholder": "留空以保留现有值",
+        "parseMode": "解析模式",
+        "messageTemplate": "消息模版（可选）",
+        "templatePlaceholder": "留空使用默认格式。支持模版变量替换。",
+        "buttons": "内联按钮（可选）",
+        "buttonText": "按钮文本",
+        "buttonUrl": "URL（支持模版变量）",
+        "addButton": "添加按钮"
+      },
+      "email": {
+        "title": "邮件 (SMTP)",
+        "description": "服务端使用 nodemailer。",
+        "host": "主机",
+        "port": "端口",
+        "secure": "安全连接",
+        "user": "用户名（可选）",
+        "pass": "密码（可选）",
+        "passPlaceholder": "留空以保留现有值",
+        "from": "发件人",
+        "to": "收件人",
+        "subjectPrefix": "主题前缀（可选）",
+        "timeoutMs": "超时 (ms)"
+      },
+      "serverchan3": {
+        "title": "Server酱³",
+        "description": "通过 Server酱³ 推送 (sc3.ft07.com)。",
+        "sendKey": "SendKey",
+        "sendKeyOptional": "SendKey（可选）",
+        "sendKeyPlaceholder": "sctp...",
+        "keepPlaceholder": "留空以保留现有值",
+        "tags": "标签（可选）",
+        "tagsPlaceholder": "标签1|标签2",
+        "short": "简短描述（可选）",
+        "shortPlaceholder": "消息卡片摘要文本"
+      },
+      "serverchanturbo": {
+        "title": "Server酱Turbo",
+        "description": "通过 Server酱Turbo 推送 (sctapi.ftqq.com)。",
+        "sendKey": "SendKey",
+        "sendKeyOptional": "SendKey（可选）",
+        "sendKeyPlaceholder": "SCT...",
+        "keepPlaceholder": "留空以保留现有值",
+        "channel": "推送通道（可选）",
+        "channelPlaceholder": "通道1|通道2"
+      },
+      "messageTemplate": "消息模版（可选）",
+      "templatePlaceholder": "支持模版变量替换，留空使用默认格式。",
+      "bark": {
+        "title": "Bark",
+        "description": "通过 Bark 推送到 iOS 设备，支持自建服务器。",
+        "serverUrl": "服务器地址",
+        "deviceKey": "设备密钥",
+        "deviceKeyOptional": "设备密钥（可选）",
+        "keepPlaceholder": "留空以保留现有值",
+        "sound": "提示音（可选）",
+        "soundPlaceholder": "如 minuet, alert",
+        "group": "分组（可选）",
+        "groupPlaceholder": "通知分组名称",
+        "level": "优先级",
+        "levelPlaceholder": "自动（根据告警级别）",
+        "icon": "图标 URL（可选）"
+      },
+      "requestFailed": "请求失败。"
+    },
+    "ruleForm": {
+      "ruleName": "规则名称",
+      "severity": "严重级别",
+      "kind": "类型",
+      "triggerDelay": "触发延迟 (秒)",
+      "recoverDelay": "恢复延迟 (秒)",
+      "notifyOnRecovery": "恢复时通知",
+      "severityOptions": {
+        "info": "信息",
+        "warning": "警告",
+        "critical": "严重"
+      },
+      "kindOptions": {
+        "agent_offline": "节点离线",
+        "metric_threshold": "指标阈值",
+        "probe_failed": "探测失败",
+        "probe_latency": "探测延迟",
+        "quota_exceeded": "流量配额",
+        "agent_expiring": "到期提醒",
+        "route_change": "路由变更 (beta)"
+      },
+      "opOptions": {
+        ">": "> 大于",
+        "<": "< 小于"
+      },
+      "missingOptions": {
+        "ignore": "忽略",
+        "alert": "告警"
+      },
+      "agents": {
+        "label": "节点",
+        "select": "选择",
+        "none": "未选择",
+        "selected": "已选择 {{count}} 个节点",
+        "pickerTitle": "选择节点",
+        "searchPlaceholder": "按名称或分组搜索...",
+        "group": "分组"
+      },
+      "channels": {
+        "title": "渠道",
+        "noChannels": "暂无渠道"
+      },
+      "metricThreshold": {
+        "title": "指标阈值",
+        "metric": "指标",
+        "missing": "缺失处理",
+        "op": "条件",
+        "value": "值",
+        "preview": "预览"
+      },
+      "probeTasks": {
+        "title": "探测任务",
+        "noProbeTasks": "暂无探测任务",
+        "latencyThreshold": "延迟阈值 (ms)"
+      },
+      "quotaExceeded": {
+        "title": "流量配额",
+        "description": "仅对配置了计费配额的节点生效。",
+        "percentage": "阈值 (%)"
+      },
+      "agentExpiring": {
+        "title": "到期提醒",
+        "description": "仅对配置了到期日期的节点生效。",
+        "daysBeforeExpiry": "提前天数"
+      },
+      "requestFailed": "请求失败。"
+    },
+    "site": {
+      "title": "界面配置",
+      "favicon": "站点图标",
+      "faviconHint": "支持 SVG、PNG、ICO 格式，最大 256 KB。留空使用默认图标。",
+      "faviconUpload": "选择文件",
+      "faviconReset": "恢复默认",
+      "faviconTooLarge": "图标文件超过 256 KB 限制。",
+      "faviconReadError": "读取文件失败。",
+      "siteName": "站点名称",
+      "siteNameHint": "显示在页头和浏览器标签页中。默认: Hina",
+      "siteDescription": "站点描述",
+      "siteDescriptionHint": "用于搜索引擎的 meta description 标签。",
+      "customHeadHtml": "自定义 Head HTML",
+      "customHeadHtmlHint": "仅注入到公开页面的 <head> 中。可用于自定义 CSS、统计代码等。",
+      "customFooterHtml": "自定义页脚 HTML",
+      "customFooterHtmlHint": "在公开页面底部渲染，仅保留基础 HTML 标签。",
+      "customHtmlTooLarge": "自定义 HTML 超过 16 KB 限制。",
+      "timezone": "时区",
+      "timezoneHint": "用于所有时间显示和告警消息。默认跟随 TZ 环境变量，若未设置则为 Asia/Shanghai。",
+      "saved": "配置已保存。",
+      "updateFailed": "更新失败。"
+    },
+    "runtime": {
+      "title": "Agent 运行时配置",
+      "telemetryInterval": "遥测间隔 (ms)",
+      "telemetryJitter": "遥测抖动 (ms)",
+      "default": "默认",
+      "source": "来源",
+      "savedPushed": "已保存。已推送到 {{count}} 个在线节点。",
+      "telemetryIntervalError": "遥测间隔必须在 1000..3600000 ms 之间。",
+      "telemetryJitterError": "遥测抖动必须在 0..600000 ms 之间。",
+      "updateFailed": "更新失败。"
+    }
+  },
+
+  "publicAgents": {
+    "title": "公开节点",
+    "viewCards": "卡片",
+    "viewList": "列表",
+    "searchPlaceholder": "搜索...",
+    "summary": {
+      "online": "在线",
+      "regions": "地区",
+      "traffic": "流量",
+      "speed": "速率"
+    },
+    "card": {
+      "traffic": "流量",
+      "ram": "内存",
+      "disk": "硬盘",
+      "expired": "已到期",
+      "expiresToday": "今天",
+      "expiresIn": "{{days}}天",
+      "uptimeDays": "{{days}}天",
+      "price": "价格",
+      "resetIn": "{{days}}天后重置"
+    },
+    "table": {
+      "name": "名称",
+      "uptime": "运行时长",
+      "expiry": "到期",
+      "tags": "标签"
+    }
+  },
+
+  "publicAgent": {
+    "back": "返回",
+    "agent": "节点",
+    "notFoundOrPrivate": {
+      "title": "未找到或未公开",
+      "description": "该节点不存在或未公开。登录后可查看非公开节点。",
+      "signIn": "去登录",
+      "goHome": "返回首页"
+    },
+    "tabs": {
+      "load": "负载",
+      "latency": "延迟"
+    },
+    "range": {
+      "live": "实时",
+      "4h": "4小时",
+      "1d": "1天",
+      "7d": "7天",
+      "30d": "30天"
+    },
+    "overview": {
+      "title": "概览",
+      "cpu": "CPU",
+      "gpu": "GPU",
+      "network": "网络",
+      "memory": "内存",
+      "disk": "磁盘",
+      "uptime": "运行时长",
+      "arch": "架构",
+      "virtualization": "虚拟化",
+      "os": "操作系统",
+      "kernel": "内核版本",
+      "trafficTotal": "总流量",
+      "swapUsed": "交换",
+      "lastReport": "最后上报",
+      "none": "无",
+      "upDown": "↑ {{up}} ↓ {{down}}"
+    },
+    "cards": {
+      "cpu": "CPU",
+      "ram": "内存",
+      "disk": "磁盘",
+      "network": "网络",
+      "upload": "上传",
+      "download": "下载",
+      "connections": "连接数",
+      "processes": "进程数"
+    },
+    "latency": {
+      "description": "探测序列层级: {{tier}}",
+      "noTasks": "暂无探测数据。",
+      "noLatencyTasks": "暂无延迟探测数据。",
+      "loadingTitle": "正在整理延迟历史",
+      "loadingDescription": "正在同步最近 {{window}} 的数据...",
+      "symlog": "Symlog",
+      "hideAll": "隐藏全部",
+      "latest": "最新值",
+      "loss": "丢包",
+      "jitter": "波动",
+      "statsMedian": "中位数",
+      "statsMin": "最小",
+      "statsMax": "最大"
+    },
+    "traceroute": {
+      "title": "路由跟踪"
+    },
+    "trends": {
+      "title": "趋势",
+      "interval": "间隔: {{sec}}s",
+      "loadingSeries": "加载序列中...",
+      "seriesError": "序列错误: {{code}}"
+    },
+    "snapshot": {
+      "load1m": "负载 (1m)",
+      "unknownGpu": "未知 GPU"
+    }
+  },
+  "billing": {
+    "overQuota": "超出配额",
+    "periodUsage": "周期用量",
+    "periodTraffic": "周期流量"
+  },
+  "live": {
+    "disconnected": "连接已断开，正在重连...",
+    "reconnected": "连接已恢复"
+  }
+}

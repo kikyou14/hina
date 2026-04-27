@@ -1,0 +1,24 @@
+{
+  "$schema": "https://raw.githubusercontent.com/oxc-project/oxc/main/npm/oxlint/configuration_schema.json",
+  "plugins": ["typescript"],
+  "rules": {
+    "no-unused-vars": "warn",
+    "no-debugger": "error",
+    "eqeqeq": "error",
+    "no-var": "error",
+    "prefer-const": "warn",
+    "@typescript-eslint/no-explicit-any": "error"
+  },
+  "categories": {
+    "correctness": "error"
+  },
+  "overrides": [
+    {
+      "files": ["apps/server/**/*.ts"],
+      "rules": {
+        "no-console": "off"
+      }
+    }
+  ],
+  "ignorePatterns": ["node_modules", "dist", "target", ".tmp", "*.config.*"]
+}

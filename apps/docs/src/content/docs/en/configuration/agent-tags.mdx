@@ -1,0 +1,72 @@
+---
+title: Agent Tags
+description: Customize agent tag styles, colors, and icons
+---
+
+import { ColorPalette, IconGallery, TagExamples } from "../../../../components/TagShowcase";
+
+Tags are used to categorize and label agents. Each agent can have multiple tags, which are displayed in both the admin panel and the public status page.
+
+## Syntax
+
+```
+name<color,icon>
+```
+
+- **name** (required): The text displayed on the tag.
+- **color** (optional): A color from the preset palette. Defaults to `blue`.
+- **icon** (optional): An icon from the preset icon set. Defaults to `tag`.
+
+Both color and icon are optional. All of the following are valid:
+
+| Input                 | Result                            |
+| --------------------- | --------------------------------- |
+| `Production`          | Text "Production", blue, tag icon |
+| `CN2<green>`          | Text "CN2", green, tag icon       |
+| `DB<violet,database>` | Text "DB", violet, database icon  |
+
+To add multiple tags at once, separate them with **semicolons**:
+
+```
+CN2<blue,route>; NAT<orange>; Primary<green,star>
+```
+
+## Usage examples
+
+<TagExamples
+  tags={[
+    "Production<green,shield>",
+    "Staging<amber,rocket>",
+    "CN2 GIA<blue,route>",
+    "Database<violet,database>",
+    "US-West<cyan,globe>",
+    "GPU<orange,chip>",
+    "Primary<teal,star>",
+    "Backup<gray,server>",
+  ]}
+/>
+
+The tags above are generated from the following input:
+
+```
+Production<green,shield>
+Staging<amber,rocket>
+CN2 GIA<blue,route>
+Database<violet,database>
+US-West<cyan,globe>
+GPU<orange,chip>
+Primary<teal,star>
+Backup<gray,server>
+```
+
+## Available colors
+
+26 preset colors, named after the [Radix UI](https://www.radix-ui.com/colors) color palette.
+
+<ColorPalette />
+
+## Available icons
+
+20 preset icons from the [HugeIcons](https://hugeicons.com/) icon library.
+
+<IconGallery />

@@ -1,0 +1,32 @@
+[package]
+name = "hina-agent"
+version = "0.2.6"
+edition = "2024"
+description = "Monitoring agent for Hina distributed server monitoring system"
+license = "MIT"
+authors = ["kikyou14"]
+repository = "https://github.com/kikyou14/hina"
+
+[dependencies]
+anyhow = "1.0.99"
+clap = { version = "4.5.48", features = ["derive", "env"] }
+fastrand = "2.3.0"
+futures-util = "0.3.31"
+libc = "0.2"
+rmp-serde = "1.3.0"
+reqwest = { version = "0.12.15", default-features = false, features = ["rustls-tls", "json"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
+serde = { version = "1.0.219", features = ["derive"] }
+serde_json = "1.0.143"
+sysinfo = "0.37.0"
+tokio = { version = "1.47.1", features = ["macros", "net", "rt-multi-thread", "signal", "sync", "time"] }
+tokio-tungstenite = { version = "0.28.0", default-features = false, features = ["connect", "rustls-tls-webpki-roots"] }
+socket2 = "0.6"
+surge-ping = "0.8"
+tracing = "0.1.41"
+tracing-subscriber = { version = "0.3.20", features = ["env-filter"] }
+url = "2.5.7"
+
+[target.'cfg(unix)'.dependencies]
+semver = "1.0"
+sha2 = "0.10"

@@ -1,0 +1,59 @@
+# https://prek.j178.dev/configuration/
+
+fail_fast = false
+
+[[repos]]
+repo = "builtin"
+hooks = [
+  { id = "trailing-whitespace", exclude = { glob = ["*.md", "apps/web/src/components/ui/**"] } },
+  { id = "end-of-file-fixer", exclude = { glob = "apps/web/src/components/ui/**" } },
+  { id = "check-merge-conflict" },
+  { id = "check-yaml" },
+  { id = "check-toml" },
+  { id = "check-json", exclude = { glob = "**/tsconfig*.json" } },
+]
+
+[[repos]]
+repo = "local"
+hooks = [
+  {
+    id = "oxfmt",
+    name = "oxfmt",
+    language = "system",
+    entry = "bunx oxfmt@latest --check",
+    pass_filenames = false,
+    types_or = ["javascript", "jsx", "ts", "tsx", "json"],
+  },
+  {
+    id = "oxlint",
+    name = "oxlint",
+    language = "system",
+    entry = "bunx oxlint",
+    pass_filenames = false,
+    types_or = ["javascript", "jsx", "ts", "tsx"],
+  },
+  {
+    id = "typecheck",
+    name = "typecheck",
+    language = "system",
+    entry = "bun run typecheck",
+    pass_filenames = false,
+    types_or = ["ts", "tsx"],
+  },
+  {
+    id = "cargo-fmt",
+    name = "cargo fmt",
+    language = "system",
+    entry = "cargo fmt --check",
+    pass_filenames = false,
+    types = ["rust"],
+  },
+  {
+    id = "cargo-clippy",
+    name = "cargo clippy",
+    language = "system",
+    entry = "cargo clippy --workspace -- -D warnings",
+    pass_filenames = false,
+    types = ["rust"],
+  },
+]

@@ -1,0 +1,845 @@
+{
+  "common": {
+    "loading": "Loading...",
+    "refresh": "Refresh",
+    "save": "Save",
+    "saving": "Saving...",
+    "retry": "Retry",
+    "create": "Create",
+    "creating": "Creating...",
+    "edit": "Edit",
+    "delete": "Delete",
+    "copy": "Copy",
+    "copied": "Copied to clipboard",
+    "copyFailed": "Failed to copy",
+    "dismiss": "Dismiss",
+    "cancel": "Cancel",
+    "confirm": "Confirm",
+    "confirmDelete": "Confirm deletion",
+    "search": "Search",
+    "clear": "Clear",
+    "all": "All",
+    "true": "True",
+    "false": "False",
+    "enable": "Enable",
+    "enabled": "Enabled",
+    "disabled": "Disabled",
+    "public": "Public",
+    "private": "Private",
+    "online": "Online",
+    "offline": "Offline",
+    "name": "Name",
+    "type": "Type",
+    "failedToLoad": "Failed to load",
+    "requestFailed": "Request failed",
+    "toggleTheme": "Toggle theme",
+    "switchLanguage": "Switch language",
+    "adminPortal": "Admin portal",
+    "logout": "Log out",
+    "showPassword": "Show password",
+    "hidePassword": "Hide password",
+    "theme": {
+      "light": "Light",
+      "dark": "Dark",
+      "system": "System"
+    },
+    "noData": "No data",
+    "optional": "optional",
+    "test": "Test",
+    "error": "An error occurred",
+    "errors": {
+      "requestFailed": "Request failed.",
+      "loadFailed": "Unable to load data.",
+      "loadDescription": "The data could not be loaded. You can try again.",
+      "createFailed": "Unable to create the item.",
+      "saveFailed": "Unable to save changes.",
+      "updateFailed": "Unable to update the item.",
+      "deleteFailed": "Unable to delete the item.",
+      "testFailed": "Unable to complete the test.",
+      "network": "Network connection failed. Check your connection and try again.",
+      "unauthorized": "Your session has expired. Sign in and try again.",
+      "forbidden": "You do not have permission to perform this action.",
+      "notFound": "The requested resource is no longer available.",
+      "conflict": "The item was changed elsewhere. Refresh and try again.",
+      "payloadTooLarge": "The request is too large. Reduce the content and try again.",
+      "rateLimited": "Too many attempts. Please wait and try again.",
+      "server": "The service is temporarily unavailable. Please try again later."
+    },
+    "errorBoundary": {
+      "title": "Something went wrong",
+      "description": "An unexpected error occurred. Please try reloading the page.",
+      "reload": "Reload page"
+    },
+    "pagination": {
+      "rangeOfTotal": "{{start}}-{{end}} of {{total}}",
+      "previous": "Previous",
+      "next": "Next",
+      "first": "First",
+      "last": "Last",
+      "pageSize": "Page size",
+      "pageSizeOption": "{{count}} per page"
+    }
+  },
+
+  "notFound": {
+    "title": "Not Found",
+    "description": "The page you are looking for does not exist.",
+    "goHome": "Go home"
+  },
+
+  "login": {
+    "title": "Admin Login",
+    "username": "Username",
+    "password": "Password",
+    "signIn": "Sign in",
+    "signingIn": "Signing in...",
+    "loginFailed": "Login failed.",
+    "invalidCredentials": "Invalid credentials.",
+    "rateLimited": "Too many attempts. Please try again later."
+  },
+
+  "admin": {
+    "title": "Admin",
+    "nav": {
+      "agents": "Agents",
+      "probeTasks": "Probe Tasks",
+      "alerts": "Alerts",
+      "auditLogins": "Login Audit",
+      "account": "Account",
+      "settings": "Settings"
+    },
+    "version": {}
+  },
+
+  "account": {
+    "title": "Account",
+    "errors": {
+      "invalidCredentials": "Invalid credentials.",
+      "invalidUsername": "Invalid username.",
+      "invalidPassword": "Invalid password.",
+      "usernameTaken": "Username already taken."
+    },
+    "username": {
+      "title": "Change username",
+      "newUsername": "New username",
+      "currentPassword": "Current password",
+      "submit": "Update username",
+      "updating": "Updating...",
+      "success": "Username updated."
+    },
+    "password": {
+      "title": "Change password",
+      "currentPassword": "Current password",
+      "newPassword": "New password",
+      "confirmPassword": "Confirm new password",
+      "submit": "Update password",
+      "updating": "Updating...",
+      "mismatch": "Passwords do not match.",
+      "success": "Password updated. Please sign in again."
+    }
+  },
+
+  "agents": {
+    "title": "Agents",
+    "createAgent": "Create agent",
+    "createDialog": {
+      "title": "Create agent"
+    },
+    "tokenCard": {
+      "title": "Agent token",
+      "description": "Store this token securely. It is not recoverable."
+    },
+    "filters": {
+      "tags": "Tags",
+      "enabled": "Enabled"
+    },
+    "table": {
+      "status": "Status",
+      "name": "Name",
+      "group": "Group",
+      "ip": "IP",
+      "flags": "Flags",
+      "actions": "Actions",
+      "over": "Over"
+    },
+    "shownTotal": "{{shown}} shown / {{total}} total",
+    "editDialog": {
+      "title": "Edit agent"
+    },
+    "billingDialog": {
+      "title": "Billing quota"
+    },
+    "billing": {
+      "quota": "Quota",
+      "unlimitedPlaceholder": "0 = unlimited",
+      "mode": "Mode",
+      "modeSum": "sum (download + upload)",
+      "modeRx": "download only",
+      "modeTx": "upload only",
+      "modeMax": "max(download, upload)",
+      "resetDay": "Reset day (UTC)",
+      "resetDayPlaceholder": "1..31",
+      "invalidQuota": "Invalid quota value.",
+      "resetDayError": "Reset day must be 1..31."
+    },
+    "rotateToken": "Rotate token",
+    "rotateConfirm": "Rotate token? The existing agent token will be invalid.",
+    "deleteConfirm": "Delete agent? This action cannot be undone and will delete all associated historical data.",
+    "deleteFailed": "Failed to delete agent.",
+    "reorderFailed": "Failed to save sort order.",
+    "dragToReorder": "Drag to reorder",
+    "form": {
+      "groupByName": "Group (by name)",
+      "note": "Note",
+      "createFailed": "Create failed.",
+      "updateFailed": "Update failed."
+    },
+    "tags": {
+      "add": "Add tag",
+      "addButton": "Add",
+      "remove": "Remove {{tag}}"
+    },
+    "pricing": {
+      "title": "Pricing",
+      "currency": "Currency",
+      "cycle": "Cycle",
+      "amount": "Amount (0 = free)",
+      "expiresAt": "Expires at",
+      "invalidAmount": "Invalid amount.",
+      "currencies": {
+        "CNY": "CNY (¥)",
+        "USD": "USD ($)",
+        "EUR": "EUR (€)",
+        "GBP": "GBP (£)",
+        "CHF": "CHF (Fr)"
+      },
+      "cycles": {
+        "monthly": "Monthly",
+        "quarterly": "Quarterly",
+        "semiannual": "Semi-annual",
+        "annual": "Annual",
+        "biennial": "Biennial",
+        "triennial": "Triennial",
+        "lifetime": "Lifetime"
+      }
+    },
+    "deploy": {
+      "button": "Deploy",
+      "title": "Deploy {{name}}",
+      "token": "Token",
+      "tokenUnavailable": "Token is not recoverable. Rotate to generate a new one.",
+      "serverUrl": "Server URL",
+      "agentOptions": "Agent Options",
+      "interface": "Interface",
+      "interfacePlaceholder": "e.g. eth0",
+      "mountPoints": "Mount Points",
+      "mountPointsPlaceholder": "e.g. /,/data",
+      "installOptions": "Install Options",
+      "downloadProxy": "Download Proxy",
+      "downloadProxyPlaceholder": "e.g. https://ghproxy.com/",
+      "serviceName": "Service Name",
+      "installDir": "Install Directory",
+      "installCommand": "Install Command",
+      "noTokenHint": "Rotate token first to generate the install command.",
+      "copyCommand": "Copy Command"
+    }
+  },
+
+  "alerts": {
+    "title": "Alerts",
+    "tabs": {
+      "active": "Active",
+      "notifications": "Notifications"
+    },
+    "active": {
+      "title": "Active alerts",
+      "count": "{{count}} active",
+      "severity": "Severity",
+      "rule": "Rule",
+      "kind": "Kind",
+      "agent": "Agent",
+      "activeSince": "Active since",
+      "value": "Value"
+    },
+    "notifications": {
+      "title": "Notification outbox",
+      "count": "{{count}} items",
+      "allStatuses": "All statuses",
+      "status": "Status",
+      "kind": "Kind",
+      "firing": "Firing",
+      "recovered": "Recovered",
+      "rule": "Rule",
+      "channel": "Channel",
+      "event": "Event",
+      "error": "Error",
+      "statuses": {
+        "pending": "Pending",
+        "sent": "Sent",
+        "dead": "Failed"
+      }
+    },
+    "severities": {
+      "info": "Info",
+      "warning": "Warning",
+      "critical": "Critical"
+    },
+    "kinds": {
+      "agent_offline": "Agent offline",
+      "metric_threshold": "Metric threshold",
+      "probe_failed": "Probe failed",
+      "probe_latency": "Probe latency",
+      "quota_exceeded": "Quota exceeded",
+      "agent_expiring": "Agent expiring",
+      "route_change": "Route change (beta)"
+    }
+  },
+
+  "audit": {
+    "logins": {
+      "title": "Login audit",
+      "limit": "Limit",
+      "prev": "Prev",
+      "next": "Next",
+      "noLogs": "No login attempts recorded.",
+      "filter": {
+        "all": "All",
+        "failures": "Only failures"
+      },
+      "table": {
+        "time": "Time",
+        "result": "Result",
+        "reason": "Reason",
+        "username": "Username",
+        "ip": "IP"
+      },
+      "result": {
+        "success": "Success",
+        "failure": "Failure"
+      },
+      "reason": {
+        "ok": "Signed in",
+        "no_user": "Unknown username",
+        "bad_password": "Wrong password"
+      }
+    }
+  },
+
+  "logs": {
+    "title": "Server logs",
+    "auto": "Auto",
+    "stick": "Stick",
+    "noLogs": "No logs.",
+    "failedToLoad": "Failed to load logs."
+  },
+
+  "scope": {
+    "label": "Scope",
+    "modes": {
+      "all": "All Agents",
+      "groups": "By Group",
+      "specific": "Specific Agents"
+    },
+    "allDescription": "Applies to all agents, including newly added ones.",
+    "noGroups": "No groups available. Create a group from the agents page first.",
+    "agentCount": "{{count}} agents"
+  },
+
+  "probes": {
+    "title": "Probe Tasks",
+    "createTask": "Create task",
+    "createDialog": {
+      "title": "Create probe task"
+    },
+    "editDialog": {
+      "title": "Edit probe task"
+    },
+    "filters": {
+      "title": "Filters",
+      "description": "Filter tasks by name/kind/enabled.",
+      "taskNamePlaceholder": "Search task name",
+      "kind": "Kind"
+    },
+    "table": {
+      "name": "Name",
+      "kind": "Kind",
+      "target": "Target",
+      "interval": "Interval",
+      "scope": "Scope",
+      "status": "Status",
+      "actions": "Actions",
+      "groups": "Groups: {{count}}",
+      "agents": "{{count}} agent(s)",
+      "results": "Results"
+    },
+    "form": {
+      "intervalSec": "Interval (sec)",
+      "timeoutMs": "Timeout (ms)",
+      "target": "Target",
+      "host": "Host",
+      "port": "Port",
+      "url": "URL",
+      "scope": "Scope",
+      "scopeDescription": "Select at least one group or agent.",
+      "groups": "Groups",
+      "agents": "Agents",
+      "noGroups": "No groups",
+      "filterAgents": "Filter agents...",
+      "traceRevealHopDetails": "Reveal hop details in public",
+      "traceRevealHopDetailsDescription": "When enabled, the public page will show per-hop IP, hostname, and ASN info.",
+      "invalidInterval": "Invalid intervalSec.",
+      "invalidTimeout": "Invalid timeoutMs.",
+      "missingTarget": "Missing target.",
+      "invalidHost": "Invalid host: must be a valid hostname or IP address.",
+      "invalidPort": "Invalid port: must be 1–65535.",
+      "invalidUrl": "Invalid URL: must start with http:// or https://.",
+      "tracerouteIpv6NotSupported": "Traceroute targets must be IPv4 (IPv6 is not supported).",
+      "missingScope": "Missing scope: select at least one group or agent.",
+      "requestFailed": "Request failed."
+    },
+    "deleteConfirm": "Delete this task?",
+    "deleteFailed": "Failed to delete task.",
+    "reorderFailed": "Failed to save sort order."
+  },
+
+  "probeResults": {
+    "detail": {
+      "rawJsonTitle": "Raw JSON",
+      "extraParseError": "Failed to parse extra payload. Showing raw JSON.",
+      "unsupportedPayload": "Unsupported probe kind or payload. Showing raw JSON.",
+      "completed": "Completed",
+      "incomplete": "Incomplete",
+      "hops": "{{count}} hops",
+      "destination": "Destination",
+      "route": "Route",
+      "requestTimedOut": "Request Timed Out",
+      "hopsTimedOut": "{{count}} hops timed out",
+      "internalHops": "{{count}} hops (internal)",
+      "networkPath": "Network Path",
+      "timeouts": "Timeouts"
+    }
+  },
+
+  "settings": {
+    "title": "Settings",
+    "tabs": {
+      "channels": "Channels",
+      "rules": "Rules",
+      "site": "Site Config",
+      "runtime": "Agent Runtime",
+      "general": "General",
+      "logs": "Logs"
+    },
+    "general": {
+      "title": "General",
+      "siteConfig": {
+        "title": "Site Configuration"
+      },
+      "database": {
+        "title": "Database"
+      },
+      "publicBaseUrl": {
+        "label": "Public Base URL",
+        "description": "Used for {{dashboard.url}} in alert notifications. Leave empty if not needed.",
+        "saveFailed": "Failed to save public base URL."
+      },
+      "sortOffline": {
+        "label": "Sort offline agents to bottom",
+        "saveFailed": "Failed to save setting."
+      },
+      "hideTraceroute": {
+        "label": "Hide traceroute from guests",
+        "saveFailed": "Failed to save setting."
+      },
+      "asnDb": {
+        "label": "ASN Database (GeoLite2-ASN)",
+        "statusLoaded": "Loaded",
+        "statusNotLoaded": "Not loaded",
+        "noFile": "File not found",
+        "ageDays": "{{days}}d {{hours}}h old",
+        "ageHours": "{{hours}}h old",
+        "ageFresh": "Just updated",
+        "refresh": "Update now",
+        "refreshing": "Downloading...",
+        "refreshed": "ASN database updated.",
+        "refreshFailed": "Failed to update ASN database."
+      },
+      "db": {
+        "label": "SQLite Database",
+        "dbSize": "Database size",
+        "walSize": "WAL size",
+        "freelistPages": "{{count}} reclaimable pages",
+        "vacuum": "Vacuum",
+        "vacuuming": "Vacuuming...",
+        "vacuumed": "Database vacuumed successfully.",
+        "vacuumFailed": "Failed to vacuum database.",
+        "vacuumConfirmTitle": "Vacuum Database",
+        "vacuumConfirmDesc": "VACUUM rebuilds the entire database file. All reads and writes will be blocked until completion, which may temporarily affect agent connections and API requests.",
+        "backup": "Backup",
+        "backingUp": "Backing up...",
+        "backupFailed": "Failed to backup database.",
+        "backupAlreadyPending": "A backup is already pending for download. Please wait for it to expire or download it first.",
+        "optimize": "Optimize",
+        "optimizing": "Optimizing...",
+        "optimized": "Database optimized successfully.",
+        "optimizeFailed": "Failed to optimize database."
+      },
+      "versionCheck": {
+        "label": "Version",
+        "currentVersion": "Current Version",
+        "upToDate": "Up to date",
+        "autoCheck": "Auto check for updates",
+        "autoCheckDescription": "Periodically checks GitHub for new releases. Disable this if deployed in an air-gapped network.",
+        "saveFailed": "Failed to save setting."
+      }
+    },
+    "channels": {
+      "createChannel": "Create channel",
+      "createDialog": {
+        "title": "Create channel"
+      },
+      "editDialog": {
+        "title": "Edit channel"
+      },
+      "table": {
+        "title": "Alert channels",
+        "count": "{{count}} channels",
+        "name": "Name",
+        "type": "Type",
+        "status": "Status",
+        "config": "Config",
+        "updated": "Updated",
+        "actions": "Actions"
+      },
+      "testSent": "Test sent.",
+      "testFailed": "Test failed.",
+      "deleteConfirm": "Delete this channel?",
+      "deleteFailed": "Failed to delete channel."
+    },
+    "rules": {
+      "createRule": "Create rule",
+      "createDialog": {
+        "title": "Create rule"
+      },
+      "editDialog": {
+        "title": "Edit rule"
+      },
+      "table": {
+        "title": "Alert rules",
+        "count": "{{count}} rules",
+        "name": "Name",
+        "severity": "Severity",
+        "kind": "Kind",
+        "status": "Status",
+        "delay": "Delay",
+        "channels": "Channels",
+        "updated": "Updated",
+        "actions": "Actions"
+      },
+      "deleteConfirm": "Delete this rule?",
+      "deleteFailed": "Failed to delete rule."
+    },
+    "channelForm": {
+      "webhook": {
+        "title": "Webhook",
+        "description": "POST/PUT JSON payload with optional HMAC signature.",
+        "url": "URL",
+        "method": "Method",
+        "timeoutMs": "Timeout (ms)",
+        "headersJson": "Headers (JSON)",
+        "secret": "Secret (optional)",
+        "secretPlaceholder": "leave blank to keep",
+        "invalidHeaders": "Invalid headers JSON."
+      },
+      "telegram": {
+        "title": "Telegram",
+        "description": "Uses bot sendMessage API.",
+        "chatId": "Chat ID",
+        "botToken": "Bot token",
+        "botTokenOptional": "Bot token (optional)",
+        "threadId": "Thread ID (optional)",
+        "threadIdPlaceholder": "numeric",
+        "disableNotification": "Disable notification",
+        "keepPlaceholder": "leave blank to keep",
+        "parseMode": "Parse mode",
+        "messageTemplate": "Message template (optional)",
+        "templatePlaceholder": "Leave empty to use the default format. Supports template variables.",
+        "buttons": "Inline buttons (optional)",
+        "buttonText": "Button text",
+        "buttonUrl": "URL (supports template variables)",
+        "addButton": "Add button"
+      },
+      "email": {
+        "title": "Email (SMTP)",
+        "description": "Uses nodemailer on the server.",
+        "host": "Host",
+        "port": "Port",
+        "secure": "Secure",
+        "user": "User (optional)",
+        "pass": "Pass (optional)",
+        "passPlaceholder": "leave blank to keep",
+        "from": "From",
+        "to": "To",
+        "subjectPrefix": "Subject prefix (optional)",
+        "timeoutMs": "Timeout (ms)"
+      },
+      "serverchan3": {
+        "title": "ServerChan V3",
+        "description": "Push via Server酱³ (sc3.ft07.com).",
+        "sendKey": "SendKey",
+        "sendKeyOptional": "SendKey (optional)",
+        "sendKeyPlaceholder": "sctp...",
+        "keepPlaceholder": "leave blank to keep",
+        "tags": "Tags (optional)",
+        "tagsPlaceholder": "tag1|tag2",
+        "short": "Brief description (optional)",
+        "shortPlaceholder": "Card summary text"
+      },
+      "serverchanturbo": {
+        "title": "ServerChan Turbo",
+        "description": "Push via Server酱Turbo (sctapi.ftqq.com).",
+        "sendKey": "SendKey",
+        "sendKeyOptional": "SendKey (optional)",
+        "sendKeyPlaceholder": "SCT...",
+        "keepPlaceholder": "leave blank to keep",
+        "channel": "Channel (optional)",
+        "channelPlaceholder": "channel1|channel2"
+      },
+      "messageTemplate": "Message template (optional)",
+      "templatePlaceholder": "Support template variable substitution, leave empty to use the default format.",
+      "bark": {
+        "title": "Bark",
+        "description": "Push to iOS devices via Bark. Supports self-hosted servers.",
+        "serverUrl": "Server URL",
+        "deviceKey": "Device Key",
+        "deviceKeyOptional": "Device Key (optional)",
+        "keepPlaceholder": "leave blank to keep",
+        "sound": "Sound (optional)",
+        "soundPlaceholder": "e.g. minuet, alert",
+        "group": "Group (optional)",
+        "groupPlaceholder": "Notification group name",
+        "level": "Priority level",
+        "levelPlaceholder": "Auto (based on severity)",
+        "icon": "Icon URL (optional)"
+      },
+      "requestFailed": "Request failed."
+    },
+    "ruleForm": {
+      "ruleName": "Rule name",
+      "severity": "Severity",
+      "kind": "Type",
+      "triggerDelay": "Trigger delay (s)",
+      "recoverDelay": "Recovery delay (s)",
+      "notifyOnRecovery": "Notify on recovery",
+      "severityOptions": {
+        "info": "Info",
+        "warning": "Warning",
+        "critical": "Critical"
+      },
+      "kindOptions": {
+        "agent_offline": "Agent Offline",
+        "metric_threshold": "Metric Threshold",
+        "probe_failed": "Probe Failed",
+        "probe_latency": "Probe Latency",
+        "quota_exceeded": "Quota Exceeded",
+        "agent_expiring": "Agent Expiring",
+        "route_change": "Route Change (beta)"
+      },
+      "opOptions": {
+        ">": "> Greater than",
+        "<": "< Less than"
+      },
+      "missingOptions": {
+        "ignore": "Ignore",
+        "alert": "Alert"
+      },
+      "agents": {
+        "label": "Agents",
+        "select": "Select",
+        "none": "None",
+        "selected": "{{count}} agents selected",
+        "pickerTitle": "Select Agents",
+        "searchPlaceholder": "Search by name or group...",
+        "group": "Group"
+      },
+      "channels": {
+        "title": "Channels",
+        "noChannels": "No channels"
+      },
+      "metricThreshold": {
+        "title": "Metric Threshold",
+        "metric": "Metric",
+        "missing": "On missing",
+        "op": "Condition",
+        "value": "Value",
+        "preview": "Preview"
+      },
+      "probeTasks": {
+        "title": "Probe tasks",
+        "noProbeTasks": "No probe tasks",
+        "latencyThreshold": "Latency threshold (ms)"
+      },
+      "quotaExceeded": {
+        "title": "Traffic quota",
+        "description": "Only agents with billing quota configured will be evaluated.",
+        "percentage": "Threshold (%)"
+      },
+      "agentExpiring": {
+        "title": "Expiry reminder",
+        "description": "Only agents with an expiry date configured will be evaluated.",
+        "daysBeforeExpiry": "Days before expiry"
+      },
+      "requestFailed": "Request failed."
+    },
+    "site": {
+      "title": "Site configuration",
+      "favicon": "Favicon",
+      "faviconHint": "Accepts SVG, PNG, or ICO. Max 256 KB. Leave empty for default.",
+      "faviconUpload": "Choose file",
+      "faviconReset": "Reset to default",
+      "faviconTooLarge": "Favicon file exceeds 256 KB limit.",
+      "faviconReadError": "Failed to read the selected file.",
+      "siteName": "Site name",
+      "siteNameHint": "Displayed in header and browser tab. Default: Hina",
+      "siteDescription": "Site description",
+      "siteDescriptionHint": "Meta description tag for search engines.",
+      "customHeadHtml": "Custom head HTML",
+      "customHeadHtmlHint": "Injected into <head> on public pages only. Use for custom CSS, analytics, etc.",
+      "customFooterHtml": "Custom footer HTML",
+      "customFooterHtmlHint": "Rendered at the bottom of public pages. Sanitized to basic HTML tags only.",
+      "customHtmlTooLarge": "Custom HTML exceeds 16 KB limit.",
+      "timezone": "Timezone",
+      "timezoneHint": "Used for all time display and alert messages. Default follows TZ env or Asia/Shanghai.",
+      "saved": "Configuration saved.",
+      "updateFailed": "Update failed."
+    },
+    "runtime": {
+      "title": "Agent runtime config",
+      "telemetryInterval": "Telemetry Interval (ms)",
+      "telemetryJitter": "Telemetry Jitter (ms)",
+      "default": "default",
+      "source": "source",
+      "savedPushed": "Saved. Pushed to {{count}} online agents.",
+      "telemetryIntervalError": "Telemetry interval must be 1000..3600000 ms.",
+      "telemetryJitterError": "Telemetry jitter must be 0..600000 ms.",
+      "updateFailed": "Update failed."
+    }
+  },
+
+  "publicAgents": {
+    "title": "Public Agents",
+    "viewCards": "Cards",
+    "viewList": "List",
+    "searchPlaceholder": "Search...",
+    "summary": {
+      "online": "Online",
+      "regions": "Regions",
+      "traffic": "Traffic",
+      "speed": "Speed"
+    },
+    "card": {
+      "traffic": "Traffic",
+      "ram": "RAM",
+      "disk": "Disk",
+      "expired": "Expired",
+      "expiresToday": "Today",
+      "expiresIn": "{{days}}d",
+      "uptimeDays": "{{days}}d",
+      "price": "Price",
+      "resetIn": "Resets in {{days}}d"
+    },
+    "table": {
+      "name": "Name",
+      "uptime": "Uptime",
+      "expiry": "Expiry",
+      "tags": "Tags"
+    }
+  },
+
+  "publicAgent": {
+    "back": "Back",
+    "agent": "Agent",
+    "notFoundOrPrivate": {
+      "title": "Not found or private",
+      "description": "This agent is not public or does not exist.",
+      "signIn": "Sign in",
+      "goHome": "Go home"
+    },
+    "tabs": {
+      "load": "Load",
+      "latency": "Latency"
+    },
+    "range": {
+      "live": "Live",
+      "4h": "4h",
+      "1d": "1d",
+      "7d": "7d",
+      "30d": "30d"
+    },
+    "overview": {
+      "title": "Overview",
+      "cpu": "CPU",
+      "gpu": "GPU",
+      "network": "Network",
+      "memory": "Memory",
+      "disk": "Disk",
+      "uptime": "Uptime",
+      "arch": "Arch",
+      "virtualization": "Virtualization",
+      "os": "OS",
+      "kernel": "Kernel",
+      "trafficTotal": "Traffic (total)",
+      "swapUsed": "Swap",
+      "lastReport": "Last report",
+      "none": "None",
+      "upDown": "↑ {{up}} ↓ {{down}}"
+    },
+    "cards": {
+      "cpu": "CPU",
+      "ram": "Ram",
+      "disk": "Disk",
+      "network": "Network",
+      "upload": "Upload",
+      "download": "Download",
+      "connections": "Connections",
+      "processes": "Processes"
+    },
+    "latency": {
+      "description": "Probe series tier: {{tier}}",
+      "noTasks": "No probe data.",
+      "noLatencyTasks": "No latency probe data.",
+      "loadingTitle": "Preparing latency history",
+      "loadingDescription": "Syncing {{window}} data...",
+      "symlog": "Symlog",
+      "hideAll": "Hide all",
+      "latest": "Latest",
+      "loss": "Loss",
+      "jitter": "Jitter",
+      "statsMedian": "median",
+      "statsMin": "min",
+      "statsMax": "max"
+    },
+    "traceroute": {
+      "title": "Traceroute"
+    },
+    "trends": {
+      "title": "Trends",
+      "interval": "Interval: {{sec}}s",
+      "loadingSeries": "Loading series...",
+      "seriesError": "Series error: {{code}}"
+    },
+    "snapshot": {
+      "load1m": "Load (1m)",
+      "unknownGpu": "Unknown GPU"
+    }
+  },
+  "billing": {
+    "overQuota": "Over quota",
+    "periodUsage": "Period usage",
+    "periodTraffic": "Period traffic"
+  },
+  "live": {
+    "disconnected": "Connection lost, reconnecting...",
+    "reconnected": "Connection restored"
+  }
+}

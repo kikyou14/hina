@@ -1,0 +1,9 @@
+services:
+  hina:
+    image: ghcr.io/kikyou14/hina:latest
+    container_name: hina
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./data:/app/data
+    restart: unless-stopped

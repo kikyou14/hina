@@ -1,0 +1,27 @@
+{
+  "printWidth": 100,
+  "endOfLine": "lf",
+  "sortImports": {
+    "partitionByNewline": true,
+    "newlinesBetween": false
+  },
+  "sortTailwindcss": {
+    "functions": ["clsx", "cn"]
+  },
+  "sortPackageJson": true,
+  "ignorePatterns": [
+    "build",
+    "coverage",
+    "node_modules/",
+    "public/",
+    "assets/",
+    "crates/",
+    "target/",
+    "data/",
+    "drizzle/",
+    "README.md",
+    "src/components/ui",
+    "*.md",
+    "*.toml"
+  ]
+}

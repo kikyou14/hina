@@ -1,0 +1,34 @@
+---
+title: Hina
+description: 分布式服务器监控系统
+template: splash
+hero:
+  tagline: 分布式服务器监控系统，提供统一的 Web UI、后端服务与轻量级 Rust agent。
+  actions:
+    - text: 快速开始
+      link: /guides/introduction/
+      icon: right-arrow
+    - text: GitHub
+      link: https://github.com/kikyou14/hina
+      icon: external
+      variant: minimal
+---
+
+import { Card, CardGrid } from "@astrojs/starlight/components";
+
+## 特性
+
+<CardGrid>
+  <Card title="多协议探测" icon="magnifier">
+    内置 ICMP / TCP / HTTP / Traceroute 探测任务，覆盖网络与服务可用性。
+  </Card>
+  <Card title="内置告警" icon="warning">
+    规则引擎驱动，支持多渠道通知分发。
+  </Card>
+  <Card title="单容器部署" icon="puzzle">
+    Server 同时托管前端静态资源，部署流程简单。
+  </Card>
+  <Card title="Rust Agent" icon="setting">
+    基于 Tokio 的异步 agent，资源占用低。
+  </Card>
+</CardGrid>

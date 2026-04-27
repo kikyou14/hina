@@ -1,0 +1,42 @@
+{
+  "name": "hina",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Distributed server monitoring system with agent, server, and web UI",
+  "license": "MIT",
+  "author": "kikyou14",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/kikyou14/hina.git"
+  },
+  "workspaces": [
+    "apps/*"
+  ],
+  "scripts": {
+    "dev:server": "bun run --cwd apps/server --env-file ../../.env --env-file ../../.env.development --env-file ../../.env.local dev",
+    "dev:web": "bun run --cwd apps/web --env-file ../../.env --env-file ../../.env.development --env-file ../../.env.local dev",
+    "dev:docs": "bun run --cwd apps/docs dev",
+    "build:web": "bun run --cwd apps/web build",
+    "build:docs": "bun run --cwd apps/docs build",
+    "start:web": "bun run --cwd apps/web --env-file ../../.env --env-file ../../.env.local preview",
+    "start:docs": "bun run --cwd apps/docs preview",
+    "start:server": "bun run --cwd apps/server --env-file ../../.env --env-file ../../.env.local start",
+    "db:generate": "bun run --cwd apps/server --env-file ../../.env --env-file ../../.env.development --env-file ../../.env.local db:generate",
+    "db:studio": "bun run --cwd apps/server --env-file ../../.env --env-file ../../.env.development --env-file ../../.env.local db:studio",
+    "typecheck": "bun run --cwd apps/web typecheck && bun run --cwd apps/server typecheck && bun run --cwd apps/docs typecheck",
+    "lint": "oxlint",
+    "lint:fix": "oxlint --fix",
+    "check": "bun run typecheck && bun run lint",
+    "format": "bunx oxfmt@latest",
+    "format:check": "bunx oxfmt@latest --check",
+    "test": "bun run test:server && bun run test:web",
+    "test:server": "bun run --cwd apps/server --env-file ../../.env --env-file ../../.env.development --env-file ../../.env.local test",
+    "test:web": "bun run --cwd apps/web test",
+    "cli": "bun run --cwd apps/server --env-file ../../.env --env-file ../../.env.development --env-file ../../.env.local cli"
+  },
+  "devDependencies": {
+    "oxfmt": "^0.41.0",
+    "oxlint": "^1.60.0",
+    "typescript": "~5.9.3"
+  }
+}
