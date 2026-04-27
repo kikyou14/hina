@@ -1,3 +1,4 @@
+import { RULE_REGISTRY } from "../rules/registry";
 import type { AlertMessageV1, AlertRuleKind } from "../types";
 
 export function buildMessage(args: {
@@ -28,6 +29,7 @@ export function buildMessage(args: {
 export function buildSampleMessage(ruleKind?: AlertRuleKind): AlertMessageV1 {
   const nowMs = Date.now();
   const kind = ruleKind ?? "metric_threshold";
+  const rule = RULE_REGISTRY[kind];
 
   return {
     v: 1,
@@ -38,7 +40,7 @@ export function buildSampleMessage(ruleKind?: AlertRuleKind): AlertMessageV1 {
       key: "test",
       agent: { id: "test-agent", name: "test-agent", group: null },
     },
-    value: { test: true },
+    value: rule.sampleValue(),
     tsMs: nowMs,
   };
 }
