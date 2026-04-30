@@ -104,12 +104,3 @@ export function formatPricing(pricing: {
   const amountStr = Number.isInteger(amount) ? String(amount) : amount.toFixed(2);
   return `${symbol}${amountStr}${suffix}`;
 }
-
-export function countryCodeToFlagEmoji(countryCode: string | null | undefined): string | null {
-  if (!countryCode) return null;
-  const cc = countryCode.trim().toUpperCase();
-  if (!/^[A-Z]{2}$/.test(cc)) return null;
-  const a = 0x1f1e6;
-  const codePoints = [...cc].map((c) => a + (c.charCodeAt(0) - 65));
-  return String.fromCodePoint(...codePoints);
-}

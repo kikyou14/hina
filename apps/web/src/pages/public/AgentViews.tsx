@@ -5,6 +5,7 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { Timer01Icon, Calendar } from "@hugeicons/core-free-icons";
 
 import type { PublicAgentSummary } from "@/api/public";
+import { CountryFlag } from "@/components/CountryFlag";
 import { CyclingText } from "@/components/CyclingText";
 import { OsIcon } from "@/components/OsIcon";
 import { TagBadge } from "@/components/TagBadge";
@@ -152,7 +153,7 @@ export const AgentCard = React.memo(function AgentCard({ a }: { a: PublicAgentSu
     <div className="hina-agent-card flex flex-col rounded-lg border bg-card p-4 transition-colors hover:bg-accent/5">
       <div className="mb-3 flex items-center justify-between gap-2">
         <div className="flex min-w-0 items-center gap-2">
-          {s.flag ? <span className="text-base leading-none">{s.flag}</span> : null}
+          <CountryFlag code={s.countryCode} className="text-base" />
           <Link
             className="truncate font-semibold leading-tight hover:underline"
             to={`/agents/${a.id}`}
@@ -220,7 +221,7 @@ export const AgentListRow = React.memo(function AgentListRow({ a }: { a: PublicA
     >
       <div className="min-w-0 overflow-hidden">
         <div className="flex items-center gap-2 min-w-0">
-          {s.flag ? <span className="text-sm leading-none">{s.flag}</span> : null}
+          <CountryFlag code={s.countryCode} className="text-sm" />
           <span
             className={`inline-block h-2 w-2 shrink-0 rounded-full ${a.status.online ? "bg-emerald-500" : "bg-muted-foreground/40"}`}
           />
@@ -307,7 +308,7 @@ export const AgentListRowCompact = React.memo(function AgentListRowCompact({
     <div className="hina-agent-list-row border-b px-4 py-3 transition-colors hover:bg-accent/5">
       <div className="flex items-center justify-between gap-2">
         <div className="flex min-w-0 items-center gap-2">
-          {s.flag ? <span className="text-sm leading-none">{s.flag}</span> : null}
+          <CountryFlag code={s.countryCode} className="text-sm" />
           <span
             className={`inline-block h-2 w-2 shrink-0 rounded-full ${a.status.online ? "bg-emerald-500" : "bg-muted-foreground/40"}`}
           />

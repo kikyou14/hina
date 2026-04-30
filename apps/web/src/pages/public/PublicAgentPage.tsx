@@ -16,7 +16,8 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { isApiError } from "@/api/http";
-import { formatBytes, formatPct, formatRateBytesPerSec, countryCodeToFlagEmoji } from "@/lib/format";
+import { CountryFlag } from "@/components/CountryFlag";
+import { formatBytes, formatPct, formatRateBytesPerSec } from "@/lib/format";
 import { getMetricNumber } from "@/lib/metrics";
 import { useOptionalAdminMe } from "@/queries/admin";
 
@@ -73,10 +74,9 @@ export function PublicAgentPage() {
               </Link>
             </Button>
             <div className="flex items-center gap-2.5">
-              {agent.data ? (() => {
-                const f = countryCodeToFlagEmoji(agent.data.geo.countryCode);
-                return f ? <span className="text-lg leading-none">{f}</span> : null;
-              })() : null}
+              {agent.data ? (
+                <CountryFlag code={agent.data.geo.countryCode} className="text-lg" />
+              ) : null}
               <h1 className="text-base font-semibold tracking-tight">
                 {agent.data?.name ?? t("publicAgent.agent")}
               </h1>

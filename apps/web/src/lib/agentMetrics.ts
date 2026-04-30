@@ -1,5 +1,5 @@
 import type { PublicAgentSummary } from "@/api/public";
-import { formatBytes, formatPricing, countryCodeToFlagEmoji } from "@/lib/format";
+import { formatBytes, formatPricing } from "@/lib/format";
 import { getMetricNumber } from "@/lib/metrics";
 import { formatDurationCompact, getDisplayedUptimeSeconds } from "@/lib/time";
 
@@ -15,7 +15,7 @@ export type StaticAgentMetrics = {
   diskPct: number | null;
   trafficPct: number | null;
 
-  flag: string | null;
+  countryCode: string | null;
   pricingLabel: string | null;
 
   memValue: string;
@@ -54,7 +54,7 @@ export function computeStaticAgentMetrics(a: PublicAgentSummary): StaticAgentMet
       ? (a.billing.usedBytes / a.billing.quotaBytes) * 100
       : null;
 
-  const flag = countryCodeToFlagEmoji(a.geo.countryCode);
+  const countryCode = a.geo.countryCode ?? null;
 
   const pricingLabel = a.pricing && a.pricing.amountUnit > 0 ? formatPricing(a.pricing) : null;
 
@@ -82,7 +82,7 @@ export function computeStaticAgentMetrics(a: PublicAgentSummary): StaticAgentMet
     memPct,
     diskPct,
     trafficPct,
-    flag,
+    countryCode,
     pricingLabel,
     memValue,
     diskValue,

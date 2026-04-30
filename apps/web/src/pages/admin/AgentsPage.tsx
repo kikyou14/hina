@@ -32,6 +32,7 @@ import {
 import type { AdminAgent, AdminAgentsResponse } from "@/api/adminAgents";
 import { AdminPagination } from "@/components/AdminPagination";
 import { useConfirm } from "@/components/ConfirmDialog";
+import { CountryFlag } from "@/components/CountryFlag";
 import { QueryErrorCard } from "@/components/QueryErrorCard";
 import { TagBadge } from "@/components/TagBadge";
 import { Button } from "@/components/ui/button";
@@ -53,7 +54,6 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
-import { countryCodeToFlagEmoji } from "@/lib/format";
 import { useAdminAgents } from "@/queries/adminAgents";
 import { invalidateAdminGroups } from "@/queries/adminGroups";
 import { AgentDeployDialog } from "./AgentDeployDialog";
@@ -144,8 +144,6 @@ function SortableAgentRowCompact({
     opacity: isDragging ? 0.5 : undefined,
   };
 
-  const flag = countryCodeToFlagEmoji(a.geo.countryCode);
-
   return (
     <div
       ref={setNodeRef}
@@ -166,7 +164,7 @@ function SortableAgentRowCompact({
               : "bg-muted-foreground/40 h-2 w-2 shrink-0 rounded-full"
           }
         />
-        {flag ? <span className="text-base leading-none">{flag}</span> : null}
+        <CountryFlag code={a.geo.countryCode} className="text-base" />
         <Link
           to={`/agents/${encodeURIComponent(a.id)}`}
           className="min-w-0 truncate font-medium hover:underline"
@@ -233,8 +231,6 @@ function SortableAgentRow({
     opacity: isDragging ? 0.5 : undefined,
   };
 
-  const flag = countryCodeToFlagEmoji(a.geo.countryCode);
-
   return (
     <TableRow ref={setNodeRef} style={style} {...attributes}>
       <TableCell className="w-8 px-1">
@@ -251,7 +247,7 @@ function SortableAgentRow({
                 : "bg-muted-foreground/40 h-2 w-2 rounded-full"
             }
           />
-          {flag ? <span className="text-base leading-none">{flag}</span> : null}
+          <CountryFlag code={a.geo.countryCode} className="text-base" />
           <Link to={`/agents/${encodeURIComponent(a.id)}`} className="font-medium hover:underline">
             {a.name}
           </Link>
