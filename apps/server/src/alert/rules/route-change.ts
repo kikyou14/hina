@@ -1,8 +1,8 @@
 import type { RouteChangeEvent } from "../../ingest/traceroute";
 import { isRecord, uniqueStrings } from "../../util/lang";
 import { ROUTE_CHANGE_COOLDOWN_MS } from "../constants";
-import { formatAsPath } from "../message/vars";
-import type { ValueLine, TemplateVarsBuilder } from "../message/vars";
+import { formatAsPath } from "../message/format";
+import type { TemplateVarsBuilder, ValueLine } from "../message/format";
 import { matchesSelector } from "../selector";
 import type { Result, ValidationError } from "../types";
 import { err, parseStringArr } from "./shared";

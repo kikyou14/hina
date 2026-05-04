@@ -1,6 +1,5 @@
 import type { AgentAlertView } from "../../agents/registry";
-import type { ValueLine } from "../message/vars";
-import type { TemplateVarsBuilder } from "../message/vars";
+import type { TemplateVarsBuilder, ValueLine } from "../message/format";
 import type { AgentSelector } from "../selector";
 import type { AlertRuleKind, AlertSeverity, Result, ValidationError } from "../types";
 
