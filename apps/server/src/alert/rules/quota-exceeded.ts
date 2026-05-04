@@ -1,6 +1,6 @@
 import { isRecord } from "../../util/lang";
-import { formatBytes, round, yyyyMmDdToDisplay } from "../message/vars";
-import type { ValueLine, TemplateVarsBuilder } from "../message/vars";
+import { formatBytes, round, yyyyMmDdToDisplay } from "../message/format";
+import type { TemplateVarsBuilder, ValueLine } from "../message/format";
 import { matchesSelector } from "../selector";
 import type { Result, ValidationError } from "../types";
 import { err } from "./shared";

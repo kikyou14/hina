@@ -1,5 +1,5 @@
-import { formatDuration } from "../message/vars";
-import type { ValueLine, TemplateVarsBuilder } from "../message/vars";
+import { formatDuration } from "../message/format";
+import type { TemplateVarsBuilder, ValueLine } from "../message/format";
 import { matchesSelector } from "../selector";
 import type { Result, ValidationError } from "../types";
 import type { DataBundle, EvalTarget, LoadedRule, PollRuleDefinition } from "./types";
@@ -29,14 +29,15 @@ export const agentOfflineRule: PollRuleDefinition<Params, Value> = {
       .filter((a) => matchesSelector(a, rule.selector))
       .map((a) => {
         const lastSeenAtMs = a.lastSeenAtMs ?? 0;
-        const offlineForMs = lastSeenAtMs > 0 ? Math.max(0, nowMs - lastSeenAtMs) : null;
-        const cond = lastSeenAtMs <= 0 || nowMs - lastSeenAtMs > bundle.missedHeartbeatGraceMs;
+        const present = lastSeenAtMs > 0;
+        const offlineForMs = present ? Math.max(0, nowMs - lastSeenAtMs) : null;
+        const cond = present && nowMs - lastSeenAtMs > bundle.missedHeartbeatGraceMs;
 
         return {
           subjectKey: subjectKey(a.id),
           subjectJson: JSON.stringify({ agentId: a.id }),
           agent: { id: a.id, name: a.name, group: a.groupName ?? null },
-          present: true,
+          present,
           cond,
           value: { offline: cond, lastSeenAtMs: a.lastSeenAtMs ?? null, offlineForMs },
         };

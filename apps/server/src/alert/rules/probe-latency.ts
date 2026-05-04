@@ -1,6 +1,6 @@
 import { isRecord, uniqueStrings } from "../../util/lang";
-import { round, truncate } from "../message/vars";
-import type { ValueLine, TemplateVarsBuilder } from "../message/vars";
+import { round, truncate } from "../message/format";
+import type { TemplateVarsBuilder, ValueLine } from "../message/format";
 import { matchesSelector } from "../selector";
 import type { Result, ValidationError } from "../types";
 import { err, parseStringArr } from "./shared";
