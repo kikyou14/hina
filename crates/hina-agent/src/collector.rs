@@ -12,6 +12,8 @@ use std::{
 use serde_json::{Map, Value};
 use sysinfo::{Components, Disks, Networks, System};
 
+use crate::net_filter::should_exclude_interface;
+
 #[derive(Debug, Clone)]
 pub struct InventorySnapshot {
     pub value: Value,
@@ -309,17 +311,13 @@ fn sum_network_totals(networks: &Networks) -> (u64, u64) {
     let mut rx = 0u64;
     let mut tx = 0u64;
     for (name, data) in networks.iter() {
-        if is_loopback_interface(name) {
+        if should_exclude_interface(name) {
             continue;
         }
         rx = rx.saturating_add(data.total_received());
         tx = tx.saturating_add(data.total_transmitted());
     }
     (rx, tx)
-}
-
-fn is_loopback_interface(name: &str) -> bool {
-    name == "lo" || name == "lo0"
 }
 
 fn max_temperature_c(components: &Components) -> Option<f64> {
