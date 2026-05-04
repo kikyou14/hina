@@ -1,6 +1,7 @@
 mod collector;
 mod config;
 mod ip_resolve;
+mod net_filter;
 mod probe;
 mod protocol;
 mod tls;

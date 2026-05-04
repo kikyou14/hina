@@ -7,9 +7,8 @@ use futures_util::stream::FuturesUnordered;
 use serde::Deserialize;
 use sysinfo::Networks;
 
-const EXCLUDED_INTERFACE_PREFIXES: &[&str] = &[
-    "br", "cni", "docker", "podman", "flannel", "lo", "veth", "virbr", "vmbr",
-];
+use crate::net_filter::should_exclude_interface;
+
 const PUBLIC_IP_TIMEOUT: Duration = Duration::from_secs(5);
 
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
@@ -93,12 +92,6 @@ fn select_resolved_ips(
     resolved
 }
 
-fn is_excluded_interface_name(name: &str) -> bool {
-    EXCLUDED_INTERFACE_PREFIXES
-        .iter()
-        .any(|prefix| name.starts_with(prefix))
-}
-
 fn sort_interface_ips(ips: &mut [IpAddr]) {
     ips.sort_by(compare_ip_addrs);
 }
@@ -132,10 +125,10 @@ fn ip_family_order(ip: &IpAddr) -> u8 {
 }
 
 fn resolve_from_interface(interfaces: &[InterfaceAddresses], name: &str) -> Option<ResolvedIps> {
-    if is_excluded_interface_name(name) {
+    if should_exclude_interface(name) {
         tracing::warn!(
             interface = name,
-            "configured interface is excluded by prefix, falling back to other IP sources"
+            "configured interface is loopback or virtual, falling back to other IP sources"
         );
         return None;
     }
@@ -166,7 +159,7 @@ fn resolve_from_local_interfaces(interfaces: &[InterfaceAddresses]) -> Option<Re
     sorted.sort_by(|left, right| left.name.cmp(&right.name));
 
     for interface in &sorted {
-        if is_excluded_interface_name(&interface.name) {
+        if should_exclude_interface(&interface.name) {
             continue;
         }
 
@@ -192,7 +185,7 @@ fn resolve_from_local_interfaces(interfaces: &[InterfaceAddresses]) -> Option<Re
     }
 
     for interface in &sorted {
-        if is_excluded_interface_name(&interface.name) {
+        if should_exclude_interface(&interface.name) {
             continue;
         }
 
@@ -402,8 +395,8 @@ mod tests {
     use std::net::IpAddr;
 
     use super::{
-        InterfaceAddresses, ResolvedIps, ResponseFormat, is_excluded_interface_name,
-        parse_ip_response, resolve_from_ip_addrs, select_resolved_ips, sort_interface_ips,
+        InterfaceAddresses, ResolvedIps, ResponseFormat, parse_ip_response, resolve_from_ip_addrs,
+        select_resolved_ips, sort_interface_ips,
     };
 
     fn iface(name: &str, ips: &[&str]) -> InterfaceAddresses {
@@ -431,25 +424,6 @@ mod tests {
 
     fn ip_strings(ips: &[IpAddr]) -> Vec<String> {
         ips.iter().map(ToString::to_string).collect()
-    }
-
-    #[test]
-    fn excludes_expected_interface_prefixes() {
-        for name in [
-            "br0",
-            "cni0",
-            "docker0",
-            "podman1",
-            "flannel.1",
-            "lo",
-            "lo0",
-            "veth123",
-            "virbr0",
-            "vmbr0",
-        ] {
-            assert!(is_excluded_interface_name(name), "{name}");
-        }
-        assert!(!is_excluded_interface_name("eth0"));
     }
 
     #[test]
