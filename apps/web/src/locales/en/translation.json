@@ -159,6 +159,7 @@
       "group": "Group",
       "ip": "IP",
       "flags": "Flags",
+      "version": "Version",
       "actions": "Actions",
       "over": "Over"
     },

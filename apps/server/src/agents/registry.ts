@@ -801,7 +801,6 @@ export class AgentRegistry {
       system: buildPublicSystemView({
         os: entry.lastOs,
         arch: entry.lastArch,
-        agentVersion: entry.lastAgentVersion,
         helloAtMs: entry.lastHelloAtMs,
       }),
       latest: entry.latest,

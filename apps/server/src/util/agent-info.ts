@@ -28,12 +28,12 @@ export type AgentInventoryView = {
 export type PublicAgentSystemView = {
   os: string | null;
   arch: string | null;
-  agentVersion: string | null;
   helloAtMs: number | null;
 };
 
 export type AdminAgentSystemView = PublicAgentSystemView & {
   host: string | null;
+  agentVersion: string | null;
   capabilities: unknown | null;
 };
 
@@ -103,13 +103,11 @@ export function decodeJsonText(value: string | null | undefined): unknown | null
 export function buildPublicSystemView(args: {
   os: string | null | undefined;
   arch: string | null | undefined;
-  agentVersion: string | null | undefined;
   helloAtMs: number | null | undefined;
 }): PublicAgentSystemView {
   return {
     os: args.os ?? null,
     arch: args.arch ?? null,
-    agentVersion: args.agentVersion ?? null,
     helloAtMs: args.helloAtMs ?? null,
   };
 }

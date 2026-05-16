@@ -159,6 +159,7 @@
       "group": "分组",
       "ip": "IP",
       "flags": "标志",
+      "version": "版本",
       "actions": "操作",
       "over": "超额"
     },

@@ -171,8 +171,14 @@ function SortableAgentRowCompact({
         >
           {a.name}
         </Link>
-        {a.group ? (
-          <span className="text-muted-foreground ml-auto shrink-0 text-xs">{a.group}</span>
+        {a.group || a.system.agentVersion ? (
+          <span className="text-muted-foreground ml-auto flex shrink-0 items-center gap-1 text-xs">
+            {a.group ? <span>{a.group}</span> : null}
+            {a.group && a.system.agentVersion ? <span aria-hidden>·</span> : null}
+            {a.system.agentVersion ? (
+              <span className="font-mono">v{a.system.agentVersion}</span>
+            ) : null}
+          </span>
         ) : null}
       </div>
 
@@ -268,6 +274,7 @@ function SortableAgentRow({
         )}
       </TableCell>
       <TableCell>{a.group ?? "-"}</TableCell>
+      <TableCell className="font-mono text-xs">{a.system.agentVersion ?? "-"}</TableCell>
       <TableCell>
         <AgentActions
           onEdit={onEdit}
@@ -483,10 +490,11 @@ export function AgentsPage() {
                     <TableRow>
                       <TableHead className="w-8 px-1" />
                       <TableHead>{t("agents.table.name")}</TableHead>
-                      <TableHead>{t("agents.table.ip")}</TableHead>
+                      <TableHead className="w-44">{t("agents.table.ip")}</TableHead>
                       <TableHead>{t("agents.filters.tags")}</TableHead>
-                      <TableHead>{t("agents.table.group")}</TableHead>
-                      <TableHead>{t("agents.table.actions")}</TableHead>
+                      <TableHead className="w-28">{t("agents.table.group")}</TableHead>
+                      <TableHead className="w-24">{t("agents.table.version")}</TableHead>
+                      <TableHead className="w-52">{t("agents.table.actions")}</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody ref={tableBodyRef}>

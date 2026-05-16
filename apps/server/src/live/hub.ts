@@ -78,6 +78,9 @@ type AdminLiveMessage =
         tx: number;
         m: Record<string, unknown>;
       } | null;
+      system?: {
+        agentVersion: string | null;
+      };
     }
   | {
       type: "event.admin.agent_geo";
@@ -136,6 +139,7 @@ export type BrowserLiveHub = {
       lastSeenAtMs: number | null;
       lastIpV4?: string | null;
       lastIpV6?: string | null;
+      system?: { agentVersion: string | null };
     }>,
   ) => void;
   publishProbeLatestBatch: (batch: ProbeResultIngestArgs[]) => void;
@@ -281,6 +285,7 @@ export function createBrowserLiveHub(deps: {
       lastSeenAtMs: number | null;
       lastIpV4?: string | null;
       lastIpV6?: string | null;
+      system?: { agentVersion: string | null };
     }>,
   ) {
     if (adminClients.size === 0 || updates.length === 0) return;
@@ -296,6 +301,7 @@ export function createBrowserLiveHub(deps: {
             lastIpV4: update.lastIpV4,
             lastIpV6: update.lastIpV6,
           },
+          ...(update.system ? { system: update.system } : {}),
         } satisfies AdminLiveMessage),
       );
     }

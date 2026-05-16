@@ -25,11 +25,11 @@ export type AgentInventory = {
 export type PublicAgentSystem = {
   os: string | null;
   arch: string | null;
-  agentVersion: string | null;
   helloAtMs: number | null;
 };
 
 export type AdminAgentSystem = PublicAgentSystem & {
   host: string | null;
+  agentVersion: string | null;
   capabilities: unknown | null;
 };

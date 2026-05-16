@@ -157,6 +157,7 @@ async function handleHelloInner(
             lastSeenAtMs: nowMs,
             lastIpV4: ipV4,
             lastIpV6: ipV6,
+            system: { agentVersion },
           },
         ]);
       }),
