@@ -10,6 +10,7 @@ import {
   probeTaskAgent,
   probeTaskGroup,
 } from "../db/schema";
+import { HOURLY_RETENTION_DAYS, RAW_RETENTION_DAYS } from "../rollup/retention";
 import {
   anonymizeTracerouteExtraForPublic,
   sanitizeTracerouteExtraRawJsonForPublic,
@@ -190,13 +191,38 @@ function formatRollupPoint(r: {
   };
 }
 
-function resolveTier(
+const HOUR_MS = 60 * 60 * 1000;
+const DAY_MS = 24 * HOUR_MS;
+
+const RAW_RETENTION_SAFETY_MS = HOUR_MS;
+
+type ResolvedTier = Exclude<ProbeSeriesTier, "auto">;
+
+export function resolveTier(
   requestedTier: ProbeSeriesTier,
-  spanMs: number,
-): Exclude<ProbeSeriesTier, "auto"> {
-  if (requestedTier !== "auto") return requestedTier;
-  if (spanMs <= 24 * 60 * 60 * 1000) return "raw";
-  if (spanMs <= 90 * 24 * 60 * 60 * 1000) return "hourly";
+  fromMs: number,
+  toMs: number,
+  nowMs: number,
+): ResolvedTier {
+  const rawFloorMs = nowMs - RAW_RETENTION_DAYS * DAY_MS + RAW_RETENTION_SAFETY_MS;
+  const hourlyFloorMs = nowMs - HOURLY_RETENTION_DAYS * DAY_MS;
+  const rawAvailable = fromMs >= rawFloorMs;
+  const hourlyAvailable = fromMs >= hourlyFloorMs;
+
+  if (requestedTier === "raw") {
+    if (rawAvailable) return "raw";
+    return hourlyAvailable ? "hourly" : "daily";
+  }
+  if (requestedTier === "hourly") {
+    return hourlyAvailable ? "hourly" : "daily";
+  }
+  if (requestedTier === "daily") {
+    return "daily";
+  }
+
+  const spanMs = toMs - fromMs;
+  if (rawAvailable && spanMs <= DAY_MS) return "raw";
+  if (hourlyAvailable) return "hourly";
   return "daily";
 }
 
@@ -207,11 +233,13 @@ export type ProbeSeriesParams = {
   toMs: number;
   maxPoints: number;
   requestedTier: ProbeSeriesTier;
+  nowMs?: number;
 };
 
 export async function queryProbeResultSeries(db: Db, params: ProbeSeriesParams) {
   const { agentId, taskId, fromMs, toMs, maxPoints, requestedTier } = params;
-  const tier = resolveTier(requestedTier, toMs - fromMs);
+  const nowMs = params.nowMs ?? Date.now();
+  const tier = resolveTier(requestedTier, fromMs, toMs, nowMs);
 
   if (tier === "raw") {
     const rows = await db

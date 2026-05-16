@@ -1,13 +1,10 @@
 import { sql } from "drizzle-orm";
 import type { DbClient, DbTx } from "../db/client";
 import { startIntervalTask } from "../util/interval-task";
+import { DAILY_RETENTION_DAYS, HOURLY_RETENTION_DAYS, RAW_RETENTION_DAYS } from "./retention";
 
 const HOUR_MS = 60 * 60 * 1000;
 const DAY_MS = 24 * HOUR_MS;
-
-const RAW_RETENTION_DAYS = 7;
-const HOURLY_RETENTION_DAYS = 90;
-const DAILY_RETENTION_DAYS = 180;
 
 const RAW_TO_HOURLY_BACKFILL_CHUNK_HOURS = 24;
 const HOURLY_TO_DAILY_BACKFILL_CHUNK_DAYS = 7;
