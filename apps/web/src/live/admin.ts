@@ -20,6 +20,9 @@ type AdminAgentDeltaMessage = {
     tx: number;
     m: Record<string, unknown>;
   } | null;
+  system?: {
+    agentVersion: string | null;
+  };
 };
 
 type AdminAgentGeoMessage = {
@@ -57,6 +60,9 @@ export function patchAdminAgent<T extends AdminAgent>(agent: T, delta: AdminAgen
       lastIpV6: delta.status.lastIpV6 === undefined ? agent.status.lastIpV6 : delta.status.lastIpV6,
     },
     latest: delta.latest === undefined ? agent.latest : delta.latest,
+    system: delta.system
+      ? { ...agent.system, agentVersion: delta.system.agentVersion }
+      : agent.system,
   };
 }
 

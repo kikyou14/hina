@@ -125,4 +125,50 @@ describe("patchAdminAgent", () => {
     expect(out.status.lastIpV4).toBe("203.0.113.10");
     expect(out.status.lastIpV6).toBe(null);
   });
+
+  test("merges system.agentVersion when delta carries it", () => {
+    const agent = makeAgent({
+      system: {
+        os: "linux",
+        arch: "x86_64",
+        agentVersion: "0.2.6",
+        helloAtMs: 50,
+        host: "host-1",
+        capabilities: null,
+      },
+    });
+
+    const out = patchAdminAgent(agent, {
+      type: "event.admin.agent_delta",
+      agentId: agent.id,
+      status: { online: true, lastSeenAtMs: 101 },
+      system: { agentVersion: "0.2.7" },
+    });
+
+    expect(out.system.agentVersion).toBe("0.2.7");
+    expect(out.system.os).toBe("linux");
+    expect(out.system.host).toBe("host-1");
+  });
+
+  test("preserves system when delta omits it", () => {
+    const agent = makeAgent({
+      system: {
+        os: null,
+        arch: null,
+        agentVersion: "0.2.6",
+        helloAtMs: null,
+        host: null,
+        capabilities: null,
+      },
+    });
+
+    const out = patchAdminAgent(agent, {
+      type: "event.admin.agent_delta",
+      agentId: agent.id,
+      status: { online: false, lastSeenAtMs: 200 },
+    });
+
+    expect(out.system).toBe(agent.system);
+    expect(out.system.agentVersion).toBe("0.2.6");
+  });
 });

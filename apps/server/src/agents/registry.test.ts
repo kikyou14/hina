@@ -129,6 +129,33 @@ describe("AgentRegistry", () => {
     expect(detail?.inventory?.cpu_count).toBe(16);
   });
 
+  test("agentVersion is admin-only in summary/detail wire shape", async () => {
+    await seedAgent(db, { id: "a1", name: "alpha", isPublic: true });
+    await registry.load();
+
+    registry.applyHello("a1", {
+      tsMs: 2_000,
+      host: "host-1",
+      os: "linux",
+      arch: "x86_64",
+      agentVersion: "9.9.9",
+      capabilities: null,
+      inventory: null,
+      ipV4: null,
+      ipV6: null,
+    });
+
+    const publicSummary = registry.listPublicSummaries()[0]!;
+    const publicDetail = registry.getPublicDetail("a1")!;
+    const adminSummary = registry.listAdminSummaries()[0]!;
+    const adminDetail = registry.getAdminDetail("a1")!;
+
+    expect(publicSummary.system).not.toHaveProperty("agentVersion");
+    expect(publicDetail.system).not.toHaveProperty("agentVersion");
+    expect(adminSummary.system.agentVersion).toBe("9.9.9");
+    expect(adminDetail.system.agentVersion).toBe("9.9.9");
+  });
+
   function applyTelemetryFull(
     id: string,
     apply: Parameters<typeof registry.applyTelemetryTraffic>[1],

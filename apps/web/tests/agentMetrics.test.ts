@@ -29,7 +29,6 @@ function makeAgent(overrides: Partial<PublicAgentSummary> = {}): PublicAgentSumm
     system: {
       os: null,
       arch: null,
-      agentVersion: null,
       helloAtMs: null,
     },
     latest: {

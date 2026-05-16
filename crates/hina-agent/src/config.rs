@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use clap::Parser;
 
 #[derive(Debug, Clone, Parser)]
-#[command(name = "hina-agent")]
+#[command(name = "hina-agent", version)]
 pub struct AgentConfig {
     #[arg(long)]
     pub server_url: String,

@@ -19,19 +19,39 @@ use crate::config::AgentConfig;
 #[cfg(unix)]
 const AUTO_UPDATE_INTERVAL: Duration = Duration::from_secs(12 * 60 * 60);
 
-#[tokio::main]
-async fn main() -> anyhow::Result<()> {
+fn init_tracing() {
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
                 .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
         )
         .init();
+}
+
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
+    let config = match AgentConfig::try_parse() {
+        Ok(cfg) => cfg,
+        Err(err) => {
+            if !matches!(
+                err.kind(),
+                clap::error::ErrorKind::DisplayHelp
+                    | clap::error::ErrorKind::DisplayHelpOnMissingArgumentOrSubcommand
+                    | clap::error::ErrorKind::DisplayVersion
+            ) {
+                init_tracing();
+                #[cfg(unix)]
+                updater::maybe_rollback();
+            }
+            err.exit();
+        }
+    };
+
+    init_tracing();
+    tracing::info!(version = env!("CARGO_PKG_VERSION"), "hina-agent starting");
 
     #[cfg(unix)]
     updater::maybe_rollback();
-
-    let config = AgentConfig::parse();
 
     let (update_tx, mut update_rx) = mpsc::channel(1);
 
