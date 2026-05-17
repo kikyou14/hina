@@ -10,8 +10,12 @@ import { SiteConfigProvider } from "@/components/SiteConfigProvider";
 import { PageSkeleton } from "@/components/Skeletons";
 import { ThemeProvider } from "@/components/ThemeProvider";
 import { Toaster } from "@/components/ui/sonner";
-import { AdminLayout } from "@/pages/admin/AdminLayout";
 
+const AdminLayout = React.lazy(async () =>
+  import("@/pages/admin/AdminLayout").then((module) => ({
+    default: module.AdminLayout,
+  })),
+);
 const AgentsPage = React.lazy(async () =>
   import("@/pages/admin/AgentsPage").then((module) => ({
     default: module.AgentsPage,
@@ -88,11 +92,7 @@ export default function App() {
 
                 <Route
                   path="/admin"
-                  element={
-                    <RequireAdmin>
-                      <AdminLayout />
-                    </RequireAdmin>
-                  }
+                  element={<RequireAdmin>{withSuspense(<AdminLayout />)}</RequireAdmin>}
                 >
                   <Route index element={<Navigate to="agents" replace />} />
                   <Route path="agents" element={withSuspense(<AgentsPage />)} />
