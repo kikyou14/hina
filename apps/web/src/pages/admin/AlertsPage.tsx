@@ -37,10 +37,12 @@ export function AlertsPage() {
   const { timezone } = useSiteConfig();
   const nowMs = Date.now();
 
-  const active = useAdminActiveAlerts();
   const [tab, setTab] = React.useState("active");
   const [status, setStatus] = React.useState("all");
-  const notifications = useAdminAlertNotifications(status === "all" ? undefined : status);
+  const active = useAdminActiveAlerts({ enabled: tab === "active" });
+  const notifications = useAdminAlertNotifications(status === "all" ? undefined : status, {
+    enabled: tab === "notifications",
+  });
 
   const tabItems = React.useMemo(
     () =>

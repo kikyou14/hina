@@ -36,20 +36,22 @@ export function useAdminAlertRules(query?: { limit?: number; offset?: number }) 
   });
 }
 
-export function useAdminActiveAlerts() {
+export function useAdminActiveAlerts(options?: { enabled?: boolean }) {
   return useQuery({
     queryKey: ["admin", "activeAlerts"],
     queryFn: () => getAdminActiveAlerts(200),
     staleTime: 3_000,
     refetchInterval: 10_000,
+    enabled: options?.enabled ?? true,
   });
 }
 
-export function useAdminAlertNotifications(status?: string) {
+export function useAdminAlertNotifications(status?: string, options?: { enabled?: boolean }) {
   return useQuery({
     queryKey: ["admin", "alertNotifications", status ?? ""],
     queryFn: () => getAdminAlertNotifications({ status, limit: 200 }),
     staleTime: 3_000,
     refetchInterval: 10_000,
+    enabled: options?.enabled ?? true,
   });
 }
