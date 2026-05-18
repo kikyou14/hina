@@ -34,7 +34,7 @@ export function CountryFlag({ code, className }: CountryFlagProps) {
         role="img"
         aria-label={label}
         title={label}
-        className={cn("fi fis leading-none", `fi-${cc}`, className)}
+        className={cn("fi leading-none", `fi-${cc}`, className)}
       />
     );
   }
