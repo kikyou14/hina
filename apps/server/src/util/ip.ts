@@ -144,55 +144,88 @@ export function stripOptionalPort(value: string): string {
   return value;
 }
 
-/**
- * Returns true if the IP is globally routable (not RFC 1918 / RFC 6598 /
- * loopback / link-local / documentation / reserved / ULA / etc).
- */
-export function isPublicIp(ip: string): boolean {
-  const family = isIP(ip);
-  if (family === 4) {
-    const b = parseIpv4Bytes(ip);
-    if (!b) return false;
-    if (b[0] === 10) return false; // 10.0.0.0/8
-    if (b[0] === 172 && b[1] >= 16 && b[1] <= 31) return false; // 172.16.0.0/12
-    if (b[0] === 192 && b[1] === 168) return false; // 192.168.0.0/16
-    if (b[0] === 100 && b[1] >= 64 && b[1] <= 127) return false; // 100.64.0.0/10 (CGNAT / Tailscale)
-    if (b[0] === 127) return false; // 127.0.0.0/8
-    if (b[0] === 169 && b[1] === 254) return false; // 169.254.0.0/16 link-local
-    if (b[0] === 0) return false; // 0.0.0.0/8
-    if (b[0] === 192 && b[1] === 0 && b[2] === 0 && b[3] !== 9 && b[3] !== 10) return false;
-    if (b[0] === 192 && b[1] === 0 && b[2] === 2) return false; // 192.0.2.0/24 TEST-NET-1
-    if (b[0] === 198 && (b[1] === 18 || b[1] === 19)) return false; // 198.18.0.0/15 benchmarking
-    if (b[0] === 198 && b[1] === 51 && b[2] === 100) return false; // 198.51.100.0/24 TEST-NET-2
-    if (b[0] === 203 && b[1] === 0 && b[2] === 113) return false; // 203.0.113.0/24 TEST-NET-3
-    if (b[0] >= 224) return false; // multicast + reserved
-    return true;
-  }
-  if (family === 6) {
-    const mapped = extractIpv4FromIpv4MappedIpv6(ip);
-    if (mapped) return isPublicIp(mapped);
+export type IpScope =
+  | "global"
+  | "private" // RFC 1918 / RFC 6598 (CGNAT) / RFC 4193 (ULA)
+  | "link-local"
+  | "loopback"
+  | "unspecified"
+  | "multicast"
+  | "documentation"
+  | "reserved"
+  | "invalid";
 
-    const h = parseIpv6ToHextets(ip);
-    if (!h) return false;
-    if (h.every((v) => v === 0)) return false; // ::
-    if (
-      h[0] === 0 &&
-      h[1] === 0 &&
-      h[2] === 0 &&
-      h[3] === 0 &&
-      h[4] === 0 &&
-      h[5] === 0 &&
-      h[6] === 0 &&
-      h[7] === 1
-    )
-      return false; // ::1
-    if ((h[0] & 0xfe00) === 0xfc00) return false; // fc00::/7 ULA
-    if ((h[0] & 0xffc0) === 0xfe80) return false; // fe80::/10 link-local
-    if ((h[0] & 0xff00) === 0xff00) return false; // ff00::/8 multicast
-    if (h[0] === 0x2001 && h[1] === 0x0db8) return false; // 2001:db8::/32 documentation
-    return true;
+export function classifyIp(ip: string): IpScope {
+  const family = isIP(ip);
+  if (family === 4) return classifyIpv4(ip);
+  if (family === 6) return classifyIpv6(ip);
+  return "invalid";
+}
+
+function classifyIpv4(ip: string): IpScope {
+  const b = parseIpv4Bytes(ip);
+  if (!b) return "invalid";
+
+  if (b[0] === 0) return "unspecified"; // 0.0.0.0/8
+  if (b[0] === 10) return "private"; // 10.0.0.0/8 RFC 1918
+  if (b[0] === 100 && b[1] >= 64 && b[1] <= 127) return "private"; // 100.64.0.0/10 CGNAT
+  if (b[0] === 127) return "loopback"; // 127.0.0.0/8
+  if (b[0] === 169 && b[1] === 254) return "link-local"; // 169.254.0.0/16
+  if (b[0] === 172 && b[1] >= 16 && b[1] <= 31) return "private"; // 172.16.0.0/12 RFC 1918
+  if (b[0] === 192 && b[1] === 0 && b[2] === 0) {
+    // 192.0.0.0/24 IETF Protocol Assignments; .9 (PCP) and .10 (TURN) are globally reachable anycast.
+    return b[3] === 9 || b[3] === 10 ? "global" : "reserved";
   }
-  return false;
+  if (b[0] === 192 && b[1] === 0 && b[2] === 2) return "documentation"; // 192.0.2.0/24 TEST-NET-1
+  if (b[0] === 192 && b[1] === 168) return "private"; // 192.168.0.0/16 RFC 1918
+  if (b[0] === 198 && (b[1] === 18 || b[1] === 19)) return "reserved"; // 198.18.0.0/15 benchmarking
+  if (b[0] === 198 && b[1] === 51 && b[2] === 100) return "documentation"; // 198.51.100.0/24 TEST-NET-2
+  if (b[0] === 203 && b[1] === 0 && b[2] === 113) return "documentation"; // 203.0.113.0/24 TEST-NET-3
+  if (b[0] >= 224 && b[0] < 240) return "multicast"; // 224.0.0.0/4
+  if (b[0] >= 240) return "reserved"; // 240.0.0.0/4 (includes 255.255.255.255 limited broadcast)
+  return "global";
+}
+
+function classifyIpv6(ip: string): IpScope {
+  const mapped = extractIpv4FromIpv4MappedIpv6(ip);
+  if (mapped) return classifyIpv4(mapped);
+
+  const h = parseIpv6ToHextets(ip);
+  if (!h) return "invalid";
+
+  if (h.every((v) => v === 0)) return "unspecified"; // ::
+  if (
+    h[0] === 0 &&
+    h[1] === 0 &&
+    h[2] === 0 &&
+    h[3] === 0 &&
+    h[4] === 0 &&
+    h[5] === 0 &&
+    h[6] === 0 &&
+    h[7] === 1
+  )
+    return "loopback"; // ::1
+  if ((h[0] & 0xfe00) === 0xfc00) return "private"; // fc00::/7 ULA
+  if ((h[0] & 0xffc0) === 0xfe80) return "link-local"; // fe80::/10
+  if ((h[0] & 0xff00) === 0xff00) return "multicast"; // ff00::/8
+  if (h[0] === 0x2001 && h[1] === 0x0db8) return "documentation"; // 2001:db8::/32
+  return "global";
+}
+
+/** Globally routable — the only scope considered "public". */
+export function isPublicIp(ip: string): boolean {
+  return classifyIp(ip) === "global";
+}
+
+export function isReportableIp(ip: string): boolean {
+  const scope = classifyIp(ip);
+  return scope === "global" || scope === "private";
+}
+
+function pickReportableForFamily(value: string | null, family: 4 | 6): string | null {
+  if (!value) return null;
+  if (isIP(value) !== family) return null;
+  return isReportableIp(value) ? value : null;
 }
 
 export function resolveAgentIpFamilies(args: {
@@ -200,14 +233,13 @@ export function resolveAgentIpFamilies(args: {
   reportedIpv6?: string | null;
   transportIp?: string | null;
 }): AgentIpFamilies {
-  const ipv4 = normalizeIpCandidate(args.reportedIpv4, 4);
-  const ipv6 = normalizeIpCandidate(args.reportedIpv6, 6);
-  const transportIp = normalizeTransportIp(args.transportIp);
-  const transportFamily = transportIp ? isIP(transportIp) : 0;
+  const reportedV4 = normalizeIpCandidate(args.reportedIpv4, 4);
+  const reportedV6 = normalizeIpCandidate(args.reportedIpv6, 6);
+  const transport = normalizeTransportIp(args.transportIp);
 
   return {
-    ipv4: ipv4 ?? (transportFamily === 4 ? transportIp : null),
-    ipv6: ipv6 ?? (transportFamily === 6 ? transportIp : null),
+    ipv4: pickReportableForFamily(reportedV4, 4) ?? pickReportableForFamily(transport, 4),
+    ipv6: pickReportableForFamily(reportedV6, 6) ?? pickReportableForFamily(transport, 6),
   };
 }
 

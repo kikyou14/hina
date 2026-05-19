@@ -108,13 +108,7 @@ fn compare_ip_addrs(left: &IpAddr, right: &IpAddr) -> Ordering {
 }
 
 fn ip_sort_priority(ip: &IpAddr) -> u8 {
-    if !is_usable_ip(ip) {
-        2
-    } else if is_link_local_ip(ip) {
-        1
-    } else {
-        0
-    }
+    if is_reportable_ip(ip) { 0 } else { 1 }
 }
 
 fn ip_family_order(ip: &IpAddr) -> u8 {
@@ -158,13 +152,13 @@ fn resolve_from_local_interfaces(interfaces: &[InterfaceAddresses]) -> Option<Re
     let mut sorted = interfaces.iter().collect::<Vec<_>>();
     sorted.sort_by(|left, right| left.name.cmp(&right.name));
 
-    for interface in &sorted {
+    for interface in sorted {
         if should_exclude_interface(&interface.name) {
             continue;
         }
 
         for ip in &interface.ips {
-            if !is_usable_ip(ip) || is_link_local_ip(ip) {
+            if !is_reportable_ip(ip) {
                 continue;
             }
 
@@ -184,43 +178,13 @@ fn resolve_from_local_interfaces(interfaces: &[InterfaceAddresses]) -> Option<Re
         }
     }
 
-    for interface in &sorted {
-        if should_exclude_interface(&interface.name) {
-            continue;
-        }
-
-        for ip in &interface.ips {
-            if !is_usable_ip(ip) || !is_link_local_ip(ip) {
-                continue;
-            }
-
-            match ip {
-                IpAddr::V4(addr) if resolved.v4.is_none() => {
-                    resolved.v4 = Some(addr.to_string());
-                }
-                IpAddr::V6(addr) if resolved.v6.is_none() => {
-                    resolved.v6 = Some(addr.to_string());
-                }
-                _ => {}
-            }
-
-            if resolved.v4.is_some() && resolved.v6.is_some() {
-                return Some(resolved);
-            }
-        }
-    }
-
-    if resolved.has_any() {
-        Some(resolved)
-    } else {
-        None
-    }
+    resolved.has_any().then_some(resolved)
 }
 
 fn resolve_from_ip_addrs(ips: &[IpAddr]) -> ResolvedIps {
     let mut resolved = ResolvedIps::default();
     for ip in ips {
-        if !is_usable_ip(ip) {
+        if !is_reportable_ip(ip) {
             continue;
         }
         match ip {
@@ -248,6 +212,10 @@ fn is_link_local_ip(ip: &IpAddr) -> bool {
         IpAddr::V4(addr) => addr.is_link_local(),
         IpAddr::V6(addr) => addr.is_unicast_link_local(),
     }
+}
+
+fn is_reportable_ip(ip: &IpAddr) -> bool {
+    is_usable_ip(ip) && !is_link_local_ip(ip)
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -555,7 +523,7 @@ mod tests {
     }
 
     #[test]
-    fn local_candidate_prefers_non_link_local_addresses_across_interfaces() {
+    fn local_candidate_skips_link_local_across_interfaces() {
         let interfaces = vec![
             iface("awdl0", &["fe80::20"]),
             iface("en0", &["2001:db8::10"]),
@@ -572,7 +540,7 @@ mod tests {
     }
 
     #[test]
-    fn local_candidate_prefers_non_link_local_addresses_on_same_interface() {
+    fn local_candidate_skips_link_local_on_same_interface() {
         let interfaces = vec![InterfaceAddresses {
             name: "eth0".to_string(),
             ips: sort_ips(&["fe80::20", "2001:db8::10", "169.254.10.20", "192.0.2.10"]),
@@ -584,6 +552,42 @@ mod tests {
             actual,
             resolved_ips(Some("192.0.2.10"), Some("2001:db8::10"))
         );
+    }
+
+    #[test]
+    fn local_candidate_returns_none_when_only_link_local_available() {
+        let interfaces = vec![iface("eth0", &["169.254.10.20", "fe80::20"])];
+
+        let actual = select_resolved_ips(None, &interfaces, None);
+
+        assert_eq!(actual, ResolvedIps::default());
+    }
+
+    #[test]
+    fn local_candidate_drops_link_local_family_but_keeps_other() {
+        let interfaces = vec![iface("eth0", &["192.0.2.10", "fe80::abcd"])];
+
+        let actual = select_resolved_ips(None, &interfaces, None);
+
+        assert_eq!(actual, resolved_ips(Some("192.0.2.10"), None));
+    }
+
+    #[test]
+    fn configured_interface_drops_link_local_family_but_keeps_other() {
+        let interfaces = vec![iface("eth0", &["192.0.2.10", "fe80::abcd"])];
+
+        let actual = select_resolved_ips(Some("eth0"), &interfaces, None);
+
+        assert_eq!(actual, resolved_ips(Some("192.0.2.10"), None));
+    }
+
+    #[test]
+    fn resolve_from_ip_addrs_skips_link_local() {
+        let ips = sort_ips(&["192.0.2.10", "fe80::20"]);
+
+        let actual = resolve_from_ip_addrs(&ips);
+
+        assert_eq!(actual, resolved_ips(Some("192.0.2.10"), None));
     }
 
     #[test]
