@@ -46,6 +46,7 @@ export function LoginDialog({ open, onOpenChange, onSuccess }: LoginDialogProps)
       action: "login",
       fallback: t("login.loginFailed"),
       codeMessages: {
+        forbidden_origin: t("login.forbiddenOrigin"),
         invalid_credentials: t("login.invalidCredentials"),
         rate_limit_exceeded: t("login.rateLimited"),
       },
