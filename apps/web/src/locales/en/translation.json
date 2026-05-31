@@ -94,6 +94,7 @@
     "signIn": "Sign in",
     "signingIn": "Signing in...",
     "loginFailed": "Login failed.",
+    "forbiddenOrigin": "The login request origin is not trusted. Check the frontend URL or reverse proxy configuration.",
     "invalidCredentials": "Invalid credentials.",
     "rateLimited": "Too many attempts. Please try again later."
   },

@@ -94,6 +94,7 @@
     "signIn": "登录",
     "signingIn": "登录中...",
     "loginFailed": "登录失败。",
+    "forbiddenOrigin": "登录请求来源不被信任，请检查前端地址或反向代理配置。",
     "invalidCredentials": "凭据无效。",
     "rateLimited": "尝试次数过多，请稍后再试。"
   },

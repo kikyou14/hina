@@ -9,11 +9,24 @@ const rootPkg = JSON.parse(readFileSync(path.resolve(__dirname, "../../package.j
 const apiOrigin = `http://127.0.0.1:${process.env.PORT?.trim() || "3000"}`;
 const wsOrigin = apiOrigin.replace(/^http/, "ws");
 
+type ProxyHostRequest = {
+  setHeader(name: string, value: string): void;
+};
+
+type ProxyHostSource = {
+  headers: {
+    host?: string;
+  };
+};
+
+function preserveProxyHost(proxyReq: ProxyHostRequest, req: ProxyHostSource) {
+  const host = req.headers.host;
+  if (host) proxyReq.setHeader("host", host);
+}
+
 const preserveHost: ProxyOptions["configure"] = (proxy) => {
-  proxy.on("proxyReqWs", (proxyReq, req) => {
-    const host = req.headers.host;
-    if (host) proxyReq.setHeader("host", host);
-  });
+  proxy.on("proxyReq", preserveProxyHost);
+  proxy.on("proxyReqWs", preserveProxyHost);
 };
 
 export default defineConfig({
@@ -28,7 +41,7 @@ export default defineConfig({
   },
   server: {
     proxy: {
-      "/api": apiOrigin,
+      "/api": { target: apiOrigin, changeOrigin: false, configure: preserveHost },
       "/live": { target: wsOrigin, ws: true, configure: preserveHost },
       "/ws": { target: wsOrigin, ws: true, configure: preserveHost },
     },
