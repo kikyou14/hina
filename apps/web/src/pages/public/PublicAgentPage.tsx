@@ -44,8 +44,9 @@ export function PublicAgentPage() {
   const isLoggedIn = Boolean(me.data?.user);
   const showTraceroute = !hideTracerouteForGuests || isLoggedIn;
 
+  const mainRef = React.useRef<HTMLDivElement | null>(null);
   React.useLayoutEffect(() => {
-    window.scrollTo(0, 0);
+    mainRef.current?.scrollTo(0, 0);
   }, [agentId]);
 
   const latestMetrics = agent.data?.latest?.m ?? null;
@@ -61,10 +62,10 @@ export function PublicAgentPage() {
   const displayedRate = getDisplayedRate(Date.now());
 
   return (
-    <div className="hina-public-page min-h-screen bg-background transition-colors duration-300">
+    <div className="hina-public-page flex h-dvh flex-col bg-background transition-colors duration-300">
       <ConnectionBanner status={liveStatus} />
       <PublicHeader
-        className="sticky top-0 z-50 border-border bg-background/80 backdrop-blur-xl"
+        className="border-border bg-background/80 backdrop-blur-xl"
         containerClassName="mx-auto max-w-[1600px] px-4 sm:px-6 lg:px-8"
         left={
           <div className="flex items-center gap-3">
@@ -99,7 +100,11 @@ export function PublicAgentPage() {
         }
       />
 
-      <main className="mx-auto max-w-400 px-4 py-6 sm:px-6 lg:px-8">
+      <main
+        ref={mainRef}
+        className="flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain [scrollbar-gutter:stable]"
+      >
+        <div className="mx-auto max-w-400 px-4 py-6 sm:px-6 lg:px-8">
         {agent.data ? (
         <div className="flex flex-col gap-6 xl:flex-row">
           <AgentInfoSidebar agent={agent.data} />
@@ -255,8 +260,9 @@ export function PublicAgentPage() {
         ) : (
           <AgentDetailSkeleton />
         )}
+        </div>
+        <PublicFooter className="mt-auto" />
       </main>
-      <PublicFooter />
       <LoginDialog
         open={loginOpen}
         onOpenChange={setLoginOpen}

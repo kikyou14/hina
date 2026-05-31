@@ -139,7 +139,7 @@ export function AgentInfoSidebar(props: {
 
   return (
     <aside className="w-full shrink-0 xl:w-85">
-      <div className="xl:sticky xl:top-20">
+      <div className="xl:sticky xl:top-6">
         <div className="hina-info-card overflow-hidden rounded-xl border border-border bg-card backdrop-blur-sm">
           <div className="space-y-0.5 p-2">
             <StatRow

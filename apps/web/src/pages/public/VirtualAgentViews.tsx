@@ -1,5 +1,5 @@
 import * as React from "react";
-import { useWindowVirtualizer } from "@tanstack/react-virtual";
+import { useVirtualizer } from "@tanstack/react-virtual";
 
 import type { PublicAgentSummary } from "@/api/public";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
@@ -12,7 +12,9 @@ const XL_QUERY = "(min-width: 1280px)";
 const LIST_OVERSCAN = 8;
 const GRID_OVERSCAN = 4;
 
-function useWindowVirtualizerAnchor<T extends HTMLElement>(
+function useScrollContainerAnchor<T extends HTMLElement>(
+  scrollElement: HTMLElement | null,
+  contentElement: HTMLElement | null,
   deps: React.DependencyList,
 ): readonly [React.RefObject<T | null>, number] {
   const ref = React.useRef<T | null>(null);
@@ -20,10 +22,13 @@ function useWindowVirtualizerAnchor<T extends HTMLElement>(
 
   const measure = React.useCallback(() => {
     const node = ref.current;
-    if (!node) return;
-    const next = node.getBoundingClientRect().top + window.scrollY;
+    if (!node || !scrollElement) return;
+    const next =
+      node.getBoundingClientRect().top -
+      scrollElement.getBoundingClientRect().top +
+      scrollElement.scrollTop;
     setScrollMargin((current) => (current === next ? current : next));
-  }, []);
+  }, [scrollElement]);
 
   React.useLayoutEffect(() => {
     measure();
@@ -32,14 +37,14 @@ function useWindowVirtualizerAnchor<T extends HTMLElement>(
       typeof ResizeObserver === "undefined" ? null : new ResizeObserver(() => measure());
     const node = ref.current;
     if (node) observer?.observe(node);
-    if (document.body) observer?.observe(document.body);
+    if (contentElement) observer?.observe(contentElement);
 
     window.addEventListener("resize", measure);
     return () => {
       observer?.disconnect();
       window.removeEventListener("resize", measure);
     };
-  }, [measure, ...deps]);
+  }, [measure, contentElement, ...deps]);
 
   return [ref, scrollMargin];
 }
@@ -70,18 +75,24 @@ function useAgentGridColumnCount(): number {
 
 export const PublicAgentListVirtualView = React.memo(function PublicAgentListVirtualView({
   agents,
+  scrollElement,
+  contentElement,
 }: {
   agents: readonly PublicAgentSummary[];
+  scrollElement: HTMLElement | null;
+  contentElement: HTMLElement | null;
 }) {
   const isDesktop = useMediaQuery(LG_QUERY);
-  const [listRef, scrollMargin] = useWindowVirtualizerAnchor<HTMLDivElement>([
-    agents.length,
-    isDesktop,
-  ]);
+  const [listRef, scrollMargin] = useScrollContainerAnchor<HTMLDivElement>(
+    scrollElement,
+    contentElement,
+    [agents.length, isDesktop],
+  );
 
   const estimateSize = React.useCallback(() => (isDesktop ? 64 : 122), [isDesktop]);
-  const rowVirtualizer = useWindowVirtualizer({
+  const rowVirtualizer = useVirtualizer({
     count: agents.length,
+    getScrollElement: () => scrollElement,
     estimateSize,
     overscan: LIST_OVERSCAN,
     scrollMargin,
@@ -131,19 +142,25 @@ export const PublicAgentListVirtualView = React.memo(function PublicAgentListVir
 
 export const PublicAgentCardsVirtualGrid = React.memo(function PublicAgentCardsVirtualGrid({
   agents,
+  scrollElement,
+  contentElement,
 }: {
   agents: readonly PublicAgentSummary[];
+  scrollElement: HTMLElement | null;
+  contentElement: HTMLElement | null;
 }) {
   const columnCount = useAgentGridColumnCount();
   const rowCount = Math.ceil(agents.length / columnCount);
-  const [gridRef, scrollMargin] = useWindowVirtualizerAnchor<HTMLDivElement>([
-    agents.length,
-    columnCount,
-  ]);
+  const [gridRef, scrollMargin] = useScrollContainerAnchor<HTMLDivElement>(
+    scrollElement,
+    contentElement,
+    [agents.length, columnCount],
+  );
 
   const estimateSize = React.useCallback(() => 240, []);
-  const rowVirtualizer = useWindowVirtualizer({
+  const rowVirtualizer = useVirtualizer({
     count: rowCount,
+    getScrollElement: () => scrollElement,
     estimateSize,
     overscan: GRID_OVERSCAN,
     scrollMargin,
