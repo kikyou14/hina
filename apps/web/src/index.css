@@ -135,6 +135,10 @@
   a {
     -webkit-user-drag: none;
   }
+
+  html:has(.hina-public-page) {
+    scrollbar-gutter: auto;
+  }
 }
 
 :root {
