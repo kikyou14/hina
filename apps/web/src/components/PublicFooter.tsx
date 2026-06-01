@@ -2,7 +2,6 @@ import type { Config } from "dompurify";
 import { useEffect, useState } from "react";
 
 import { useSiteConfig } from "@/components/SiteConfigProvider";
-import { cn } from "@/lib/utils";
 
 const PURIFY_CONFIG: Config = {
   ALLOWED_TAGS: ["a", "span", "div", "p", "br", "strong", "em", "b", "i", "img", "ul", "ol", "li"],
@@ -26,11 +25,7 @@ function loadSanitizer(): Promise<Sanitizer> {
 
 type FooterState = { kind: "loading" } | { kind: "ready"; source: string; html: string };
 
-interface PublicFooterProps {
-  className?: string;
-}
-
-export function PublicFooter({ className }: PublicFooterProps) {
+export function PublicFooter() {
   const { customFooterHtml } = useSiteConfig();
   const [state, setState] = useState<FooterState>(() =>
     customFooterHtml ? { kind: "loading" } : { kind: "ready", source: "", html: "" },
@@ -67,21 +62,13 @@ export function PublicFooter({ className }: PublicFooterProps) {
     }
     if (state.html) {
       return (
-        <footer
-          className={cn("hina-custom-footer shrink-0", className)}
-          dangerouslySetInnerHTML={{ __html: state.html }}
-        />
+        <footer className="hina-custom-footer" dangerouslySetInnerHTML={{ __html: state.html }} />
       );
     }
   }
 
   return (
-    <footer
-      className={cn(
-        "hina-public-footer text-muted-foreground/70 border-border/50 shrink-0 border-t py-2.5 text-center text-[11px]",
-        className,
-      )}
-    >
+    <footer className="hina-public-footer text-muted-foreground border-t py-4 text-center text-xs">
       <a
         href="https://github.com/kikyou14/hina"
         target="_blank"
