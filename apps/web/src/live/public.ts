@@ -3,6 +3,7 @@ import * as React from "react";
 
 import type { PublicAgentDetailResponse, PublicAgentSummary } from "@/api/public";
 import { useOptionalAdminMe } from "@/queries/admin";
+import { applyAgentOps, hasUpsert, type PendingAgentOp } from "./agentOps";
 import { useLiveSocket } from "./client";
 
 type PublicLiveMessage =
@@ -19,21 +20,7 @@ type PublicLiveMessage =
       deltaTx: number;
     };
 
-function upsertAgent(list: PublicAgentSummary[], agent: PublicAgentSummary): PublicAgentSummary[] {
-  const existingIndex = list.findIndex((entry) => entry.id === agent.id);
-  if (existingIndex === -1) {
-    return [...list, agent].sort((left: PublicAgentSummary, right: PublicAgentSummary) =>
-      left.name.localeCompare(right.name, "en"),
-    );
-  }
-  const next = [...list];
-  next[existingIndex] = agent;
-  return next;
-}
-
-function removeAgent(list: PublicAgentSummary[], agentId: string): PublicAgentSummary[] {
-  return list.filter((entry) => entry.id !== agentId);
-}
+const LIST_FLUSH_INTERVAL_MS = 500;
 
 export function usePublicLiveSync(args?: {
   agentId?: string;
@@ -80,6 +67,30 @@ export function usePublicLiveSync(args?: {
     }
   });
 
+  const pendingAgentOpsRef = React.useRef<Map<string, PendingAgentOp>>(new Map());
+  const listFlushTimerRef = React.useRef<number | null>(null);
+
+  const flushAgentOps = React.useEffectEvent(() => {
+    const ops = pendingAgentOpsRef.current;
+    if (ops.size === 0) return;
+    pendingAgentOpsRef.current = new Map();
+    queryClient.setQueryData<{ agents: PublicAgentSummary[] } | undefined>(
+      ["public", "agents"],
+      (current) => {
+        if (!current && !hasUpsert(ops)) return current;
+        return { agents: applyAgentOps(current?.agents ?? [], ops) };
+      },
+    );
+  });
+
+  const scheduleAgentFlush = React.useEffectEvent(() => {
+    if (listFlushTimerRef.current !== null) return;
+    listFlushTimerRef.current = window.setTimeout(() => {
+      listFlushTimerRef.current = null;
+      flushAgentOps();
+    }, LIST_FLUSH_INTERVAL_MS);
+  });
+
   const { status } = useLiveSocket<PublicLiveMessage>({
     path: "/live/public",
     enabled: authSettled,
@@ -96,19 +107,21 @@ export function usePublicLiveSync(args?: {
     },
     onMessage(message) {
       if (message.type === "snapshot.public.agents") {
-        queryClient.setQueryData(["public", "agents"], {
-          agents: message.agents,
-        });
+        pendingAgentOpsRef.current.clear();
+        if (listFlushTimerRef.current !== null) {
+          window.clearTimeout(listFlushTimerRef.current);
+          listFlushTimerRef.current = null;
+        }
+        queryClient.setQueryData(["public", "agents"], { agents: message.agents });
         return;
       }
 
       if (message.type === "event.public.agent_upsert") {
-        queryClient.setQueryData<{ agents: PublicAgentSummary[] } | undefined>(
-          ["public", "agents"],
-          (current) => ({
-            agents: upsertAgent(current?.agents ?? [], message.agent),
-          }),
-        );
+        pendingAgentOpsRef.current.set(message.agent.id, {
+          kind: "upsert",
+          agent: message.agent,
+        });
+        scheduleAgentFlush();
 
         if (args?.agentId && args.agentId === message.agent.id) {
           queryClient.setQueryData<PublicAgentDetailResponse | undefined>(
@@ -142,33 +155,41 @@ export function usePublicLiveSync(args?: {
         return;
       }
 
-      if (message.type !== "event.public.agent_remove") {
-        if (message.type === "event.public.telemetry_delta") {
-          if (args?.agentId && args.agentId === message.agentId) {
-            onTelemetryDelta(message);
+      if (message.type === "event.public.agent_remove") {
+        pendingAgentOpsRef.current.set(message.agentId, { kind: "remove" });
+        scheduleAgentFlush();
+
+        if (args?.agentId && args.agentId === message.agentId) {
+          queryClient.invalidateQueries({
+            queryKey: ["public", "agent", message.agentId],
+          });
+          if (args.liveSeries) {
+            queryClient.invalidateQueries({
+              queryKey: ["public", "series", message.agentId],
+            });
           }
-          return;
         }
         return;
       }
 
-      queryClient.setQueryData<{ agents: PublicAgentSummary[] } | undefined>(
-        ["public", "agents"],
-        (current) => (current ? { agents: removeAgent(current.agents, message.agentId) } : current),
-      );
-
-      if (args?.agentId && args.agentId === message.agentId) {
-        queryClient.invalidateQueries({
-          queryKey: ["public", "agent", message.agentId],
-        });
-        if (args.liveSeries) {
-          queryClient.invalidateQueries({
-            queryKey: ["public", "series", message.agentId],
-          });
+      if (message.type === "event.public.telemetry_delta") {
+        if (args?.agentId && args.agentId === message.agentId) {
+          onTelemetryDelta(message);
         }
+        return;
       }
     },
   });
+
+  React.useEffect(() => {
+    return () => {
+      pendingAgentOpsRef.current.clear();
+      if (listFlushTimerRef.current !== null) {
+        window.clearTimeout(listFlushTimerRef.current);
+        listFlushTimerRef.current = null;
+      }
+    };
+  }, [reconnectKey]);
 
   React.useEffect(() => {
     return () => {
