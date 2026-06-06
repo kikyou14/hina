@@ -115,15 +115,17 @@ export const PublicAgentListVirtualView = React.memo(function PublicAgentListVir
 
   if (isDesktop) {
     return (
-      <div className="rounded-lg border">
+      <div className="hina-agent-list-card rounded-lg border">
         <AgentListHeader />
-        <div ref={listRef}>{virtualBody}</div>
+        <div ref={listRef} className="overflow-hidden rounded-b-lg">
+          {virtualBody}
+        </div>
       </div>
     );
   }
 
   return (
-    <div ref={listRef} className="rounded-lg border">
+    <div ref={listRef} className="hina-agent-list-card overflow-hidden rounded-lg border">
       {virtualBody}
     </div>
   );
