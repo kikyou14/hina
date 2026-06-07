@@ -217,7 +217,7 @@ export const AgentListRow = React.memo(function AgentListRow({ a }: { a: PublicA
 
   return (
     <div
-      className={`${AGENT_LIST_GRID_CLASS} hina-agent-list-row border-b px-4 py-2.5 transition-colors hover:bg-accent/5`}
+      className={`${AGENT_LIST_GRID_CLASS} border-b px-4 py-2.5 transition-colors hover:bg-accent/5`}
     >
       <div className="min-w-0 overflow-hidden">
         <div className="flex items-center gap-2 min-w-0">
@@ -279,7 +279,7 @@ export function AgentListHeader() {
   const { t } = useTranslation();
   return (
     <div
-      className={`${AGENT_LIST_GRID_CLASS} hina-list-header sticky top-0 z-10 border-b bg-muted/70 px-4 py-2 text-xs font-medium uppercase tracking-wide text-muted-foreground backdrop-blur`}
+      className={`${AGENT_LIST_GRID_CLASS} sticky top-0 z-10 rounded-t-lg border-b bg-muted/70 px-4 py-2 text-xs font-medium uppercase tracking-wide text-muted-foreground backdrop-blur`}
     >
       <div className="min-w-0">{t("publicAgents.table.name")}</div>
       <div className="grid min-w-0 grid-cols-4 gap-3">
@@ -305,7 +305,7 @@ export const AgentListRowCompact = React.memo(function AgentListRowCompact({
   const s = computeStaticAgentMetrics(a);
 
   return (
-    <div className="hina-agent-list-row border-b px-4 py-3 transition-colors hover:bg-accent/5">
+    <div className="border-b px-4 py-3 transition-colors hover:bg-accent/5">
       <div className="flex items-center justify-between gap-2">
         <div className="flex min-w-0 items-center gap-2">
           <CountryFlag code={s.countryCode} className="text-sm" />

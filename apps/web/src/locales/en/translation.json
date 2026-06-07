@@ -16,7 +16,6 @@
     "cancel": "Cancel",
     "confirm": "Confirm",
     "confirmDelete": "Confirm deletion",
-    "search": "Search",
     "clear": "Clear",
     "all": "All",
     "true": "True",
@@ -31,7 +30,6 @@
     "name": "Name",
     "type": "Type",
     "failedToLoad": "Failed to load",
-    "requestFailed": "Request failed",
     "toggleTheme": "Toggle theme",
     "switchLanguage": "Switch language",
     "adminPortal": "Admin portal",
@@ -80,13 +78,11 @@
       "pageSizeOption": "{{count}} per page"
     }
   },
-
   "notFound": {
     "title": "Not Found",
     "description": "The page you are looking for does not exist.",
     "goHome": "Go home"
   },
-
   "login": {
     "title": "Admin Login",
     "username": "Username",
@@ -98,9 +94,7 @@
     "invalidCredentials": "Invalid credentials.",
     "rateLimited": "Too many attempts. Please try again later."
   },
-
   "admin": {
-    "title": "Admin",
     "nav": {
       "agents": "Agents",
       "probeTasks": "Probe Tasks",
@@ -108,10 +102,8 @@
       "auditLogins": "Login Audit",
       "account": "Account",
       "settings": "Settings"
-    },
-    "version": {}
+    }
   },
-
   "account": {
     "title": "Account",
     "errors": {
@@ -139,30 +131,22 @@
       "success": "Password updated. Please sign in again."
     }
   },
-
   "agents": {
     "title": "Agents",
     "createAgent": "Create agent",
     "createDialog": {
       "title": "Create agent"
     },
-    "tokenCard": {
-      "title": "Agent token",
-      "description": "Store this token securely. It is not recoverable."
-    },
     "filters": {
       "tags": "Tags",
       "enabled": "Enabled"
     },
     "table": {
-      "status": "Status",
       "name": "Name",
       "group": "Group",
       "ip": "IP",
-      "flags": "Flags",
       "version": "Version",
-      "actions": "Actions",
-      "over": "Over"
+      "actions": "Actions"
     },
     "shownTotal": "{{shown}} shown / {{total}} total",
     "editDialog": {
@@ -246,7 +230,6 @@
       "copyCommand": "Copy Command"
     }
   },
-
   "alerts": {
     "title": "Alerts",
     "tabs": {
@@ -296,7 +279,6 @@
       "route_change": "Route change (beta)"
     }
   },
-
   "audit": {
     "logins": {
       "title": "Login audit",
@@ -326,7 +308,6 @@
       }
     }
   },
-
   "logs": {
     "title": "Server logs",
     "auto": "Auto",
@@ -334,7 +315,6 @@
     "noLogs": "No logs.",
     "failedToLoad": "Failed to load logs."
   },
-
   "scope": {
     "label": "Scope",
     "modes": {
@@ -346,7 +326,6 @@
     "noGroups": "No groups available. Create a group from the agents page first.",
     "agentCount": "{{count}} agents"
   },
-
   "probes": {
     "title": "Probe Tasks",
     "createTask": "Create task",
@@ -357,8 +336,6 @@
       "title": "Edit probe task"
     },
     "filters": {
-      "title": "Filters",
-      "description": "Filter tasks by name/kind/enabled.",
       "taskNamePlaceholder": "Search task name",
       "kind": "Kind"
     },
@@ -367,12 +344,9 @@
       "kind": "Kind",
       "target": "Target",
       "interval": "Interval",
-      "scope": "Scope",
       "status": "Status",
       "actions": "Actions",
-      "groups": "Groups: {{count}}",
-      "agents": "{{count}} agent(s)",
-      "results": "Results"
+      "agents": "{{count}} agent(s)"
     },
     "form": {
       "intervalSec": "Interval (sec)",
@@ -381,14 +355,8 @@
       "host": "Host",
       "port": "Port",
       "url": "URL",
-      "scope": "Scope",
-      "scopeDescription": "Select at least one group or agent.",
-      "groups": "Groups",
       "agents": "Agents",
-      "noGroups": "No groups",
-      "filterAgents": "Filter agents...",
       "traceRevealHopDetails": "Reveal hop details in public",
-      "traceRevealHopDetailsDescription": "When enabled, the public page will show per-hop IP, hostname, and ASN info.",
       "invalidInterval": "Invalid intervalSec.",
       "invalidTimeout": "Invalid timeoutMs.",
       "missingTarget": "Missing target.",
@@ -396,14 +364,12 @@
       "invalidPort": "Invalid port: must be 1–65535.",
       "invalidUrl": "Invalid URL: must start with http:// or https://.",
       "tracerouteIpv6NotSupported": "Traceroute targets must be IPv4 (IPv6 is not supported).",
-      "missingScope": "Missing scope: select at least one group or agent.",
       "requestFailed": "Request failed."
     },
     "deleteConfirm": "Delete this task?",
     "deleteFailed": "Failed to delete task.",
     "reorderFailed": "Failed to save sort order."
   },
-
   "probeResults": {
     "detail": {
       "rawJsonTitle": "Raw JSON",
@@ -412,16 +378,13 @@
       "completed": "Completed",
       "incomplete": "Incomplete",
       "hops": "{{count}} hops",
-      "destination": "Destination",
       "route": "Route",
-      "requestTimedOut": "Request Timed Out",
       "hopsTimedOut": "{{count}} hops timed out",
       "internalHops": "{{count}} hops (internal)",
       "networkPath": "Network Path",
       "timeouts": "Timeouts"
     }
   },
-
   "settings": {
     "title": "Settings",
     "tabs": {
@@ -433,7 +396,6 @@
       "logs": "Logs"
     },
     "general": {
-      "title": "General",
       "siteConfig": {
         "title": "Site Configuration"
       },
@@ -656,7 +618,6 @@
         "alert": "Alert"
       },
       "agents": {
-        "label": "Agents",
         "select": "Select",
         "none": "None",
         "selected": "{{count}} agents selected",
@@ -727,9 +688,7 @@
       "updateFailed": "Update failed."
     }
   },
-
   "publicAgents": {
-    "title": "Public Agents",
     "viewCards": "Cards",
     "viewList": "List",
     "searchPlaceholder": "Search...",
@@ -757,9 +716,7 @@
       "tags": "Tags"
     }
   },
-
   "publicAgent": {
-    "back": "Back",
     "agent": "Agent",
     "notFoundOrPrivate": {
       "title": "Not found or private",
@@ -768,21 +725,11 @@
       "goHome": "Go home"
     },
     "tabs": {
-      "load": "Load",
       "latency": "Latency"
     },
-    "range": {
-      "live": "Live",
-      "4h": "4h",
-      "1d": "1d",
-      "7d": "7d",
-      "30d": "30d"
-    },
     "overview": {
-      "title": "Overview",
       "cpu": "CPU",
       "gpu": "GPU",
-      "network": "Network",
       "memory": "Memory",
       "disk": "Disk",
       "uptime": "Uptime",
@@ -790,11 +737,9 @@
       "virtualization": "Virtualization",
       "os": "OS",
       "kernel": "Kernel",
-      "trafficTotal": "Traffic (total)",
       "swapUsed": "Swap",
       "lastReport": "Last report",
-      "none": "None",
-      "upDown": "↑ {{up}} ↓ {{down}}"
+      "none": "None"
     },
     "cards": {
       "cpu": "CPU",
@@ -807,14 +752,11 @@
       "processes": "Processes"
     },
     "latency": {
-      "description": "Probe series tier: {{tier}}",
       "noTasks": "No probe data.",
       "noLatencyTasks": "No latency probe data.",
       "loadingTitle": "Preparing latency history",
       "loadingDescription": "Syncing {{window}} data...",
       "symlog": "Symlog",
-      "hideAll": "Hide all",
-      "latest": "Latest",
       "loss": "Loss",
       "jitter": "Jitter",
       "statsMedian": "median",
@@ -824,12 +766,6 @@
     "traceroute": {
       "title": "Traceroute"
     },
-    "trends": {
-      "title": "Trends",
-      "interval": "Interval: {{sec}}s",
-      "loadingSeries": "Loading series...",
-      "seriesError": "Series error: {{code}}"
-    },
     "snapshot": {
       "load1m": "Load (1m)",
       "unknownGpu": "Unknown GPU"
@@ -837,7 +773,6 @@
   },
   "billing": {
     "overQuota": "Over quota",
-    "periodUsage": "Period usage",
     "periodTraffic": "Period traffic"
   },
   "live": {

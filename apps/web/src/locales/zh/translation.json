@@ -16,7 +16,6 @@
     "cancel": "取消",
     "confirm": "确认",
     "confirmDelete": "确认删除",
-    "search": "搜索",
     "clear": "清除",
     "all": "全部",
     "true": "是",
@@ -31,7 +30,6 @@
     "name": "名称",
     "type": "类型",
     "failedToLoad": "加载失败",
-    "requestFailed": "请求失败",
     "toggleTheme": "切换主题",
     "switchLanguage": "切换语言",
     "adminPortal": "管理入口",
@@ -80,13 +78,11 @@
       "pageSizeOption": "{{count}} 条 / 页"
     }
   },
-
   "notFound": {
     "title": "未找到",
     "description": "您访问的页面不存在。",
     "goHome": "返回首页"
   },
-
   "login": {
     "title": "管理员登录",
     "username": "用户名",
@@ -98,9 +94,7 @@
     "invalidCredentials": "凭据无效。",
     "rateLimited": "尝试次数过多，请稍后再试。"
   },
-
   "admin": {
-    "title": "管理",
     "nav": {
       "agents": "节点管理",
       "probeTasks": "探测任务",
@@ -108,10 +102,8 @@
       "auditLogins": "登录审计",
       "account": "账户",
       "settings": "设置"
-    },
-    "version": {}
+    }
   },
-
   "account": {
     "title": "账户",
     "errors": {
@@ -139,30 +131,22 @@
       "success": "密码已更新，请重新登录。"
     }
   },
-
   "agents": {
     "title": "节点",
     "createAgent": "创建节点",
     "createDialog": {
       "title": "创建节点"
     },
-    "tokenCard": {
-      "title": "节点令牌",
-      "description": "请妥善保管此令牌，令牌不可恢复。"
-    },
     "filters": {
       "tags": "标签",
       "enabled": "启用"
     },
     "table": {
-      "status": "状态",
       "name": "名称",
       "group": "分组",
       "ip": "IP",
-      "flags": "标志",
       "version": "版本",
-      "actions": "操作",
-      "over": "超额"
+      "actions": "操作"
     },
     "shownTotal": "已显示 {{shown}} / 共 {{total}} 个",
     "editDialog": {
@@ -246,7 +230,6 @@
       "copyCommand": "复制命令"
     }
   },
-
   "alerts": {
     "title": "告警",
     "tabs": {
@@ -296,7 +279,6 @@
       "route_change": "路由变更 (beta)"
     }
   },
-
   "audit": {
     "logins": {
       "title": "登录审计",
@@ -326,7 +308,6 @@
       }
     }
   },
-
   "logs": {
     "title": "服务器日志",
     "auto": "自动",
@@ -334,7 +315,6 @@
     "noLogs": "暂无日志。",
     "failedToLoad": "加载日志失败。"
   },
-
   "scope": {
     "label": "适用范围",
     "modes": {
@@ -346,7 +326,6 @@
     "noGroups": "暂无分组，请先在节点管理页面创建分组。",
     "agentCount": "{{count}} 个节点"
   },
-
   "probes": {
     "title": "探测任务",
     "createTask": "创建任务",
@@ -357,8 +336,6 @@
       "title": "编辑探测任务"
     },
     "filters": {
-      "title": "筛选",
-      "description": "按名称/类型/启用状态筛选任务。",
       "taskNamePlaceholder": "搜索任务名称",
       "kind": "类型"
     },
@@ -367,12 +344,9 @@
       "kind": "类型",
       "target": "目标",
       "interval": "间隔",
-      "scope": "范围",
       "status": "状态",
       "actions": "操作",
-      "groups": "分组: {{count}}",
-      "agents": "{{count}} 个节点",
-      "results": "结果"
+      "agents": "{{count}} 个节点"
     },
     "form": {
       "intervalSec": "间隔 (秒)",
@@ -381,14 +355,8 @@
       "host": "主机",
       "port": "端口",
       "url": "URL",
-      "scope": "范围",
-      "scopeDescription": "至少选择一个分组或节点。",
-      "groups": "分组",
       "agents": "节点",
-      "noGroups": "暂无分组",
-      "filterAgents": "筛选节点...",
       "traceRevealHopDetails": "对外显示每跳详情",
-      "traceRevealHopDetailsDescription": "启用后，对访客显示每跳 IP、hostname 和 ASN。",
       "invalidInterval": "无效的间隔值。",
       "invalidTimeout": "无效的超时值。",
       "missingTarget": "缺少目标。",
@@ -396,14 +364,12 @@
       "invalidPort": "无效的端口号：必须是 1–65535。",
       "invalidUrl": "无效的 URL：必须以 http:// 或 https:// 开头。",
       "tracerouteIpv6NotSupported": "Traceroute 仅支持 IPv4 目标（不支持 IPv6）。",
-      "missingScope": "缺少范围：请至少选择一个分组或节点。",
       "requestFailed": "请求失败。"
     },
     "deleteConfirm": "确定要删除此任务吗？",
     "deleteFailed": "删除任务失败。",
     "reorderFailed": "保存排序失败。"
   },
-
   "probeResults": {
     "detail": {
       "rawJsonTitle": "原始 JSON",
@@ -412,16 +378,13 @@
       "completed": "已完成",
       "incomplete": "未完成",
       "hops": "{{count}} 跳",
-      "destination": "目标地址",
       "route": "路由",
-      "requestTimedOut": "请求超时",
       "hopsTimedOut": "{{count}} 跳超时",
       "internalHops": "{{count}} 跳（内网）",
       "networkPath": "网络路径",
       "timeouts": "超时"
     }
   },
-
   "settings": {
     "title": "设置",
     "tabs": {
@@ -433,7 +396,6 @@
       "logs": "日志"
     },
     "general": {
-      "title": "通用设置",
       "siteConfig": {
         "title": "站点配置"
       },
@@ -656,7 +618,6 @@
         "alert": "告警"
       },
       "agents": {
-        "label": "节点",
         "select": "选择",
         "none": "未选择",
         "selected": "已选择 {{count}} 个节点",
@@ -727,9 +688,7 @@
       "updateFailed": "更新失败。"
     }
   },
-
   "publicAgents": {
-    "title": "公开节点",
     "viewCards": "卡片",
     "viewList": "列表",
     "searchPlaceholder": "搜索...",
@@ -757,9 +716,7 @@
       "tags": "标签"
     }
   },
-
   "publicAgent": {
-    "back": "返回",
     "agent": "节点",
     "notFoundOrPrivate": {
       "title": "未找到或未公开",
@@ -768,21 +725,11 @@
       "goHome": "返回首页"
     },
     "tabs": {
-      "load": "负载",
       "latency": "延迟"
     },
-    "range": {
-      "live": "实时",
-      "4h": "4小时",
-      "1d": "1天",
-      "7d": "7天",
-      "30d": "30天"
-    },
     "overview": {
-      "title": "概览",
       "cpu": "CPU",
       "gpu": "GPU",
-      "network": "网络",
       "memory": "内存",
       "disk": "磁盘",
       "uptime": "运行时长",
@@ -790,11 +737,9 @@
       "virtualization": "虚拟化",
       "os": "操作系统",
       "kernel": "内核版本",
-      "trafficTotal": "总流量",
       "swapUsed": "交换",
       "lastReport": "最后上报",
-      "none": "无",
-      "upDown": "↑ {{up}} ↓ {{down}}"
+      "none": "无"
     },
     "cards": {
       "cpu": "CPU",
@@ -807,14 +752,11 @@
       "processes": "进程数"
     },
     "latency": {
-      "description": "探测序列层级: {{tier}}",
       "noTasks": "暂无探测数据。",
       "noLatencyTasks": "暂无延迟探测数据。",
       "loadingTitle": "正在整理延迟历史",
       "loadingDescription": "正在同步最近 {{window}} 的数据...",
       "symlog": "Symlog",
-      "hideAll": "隐藏全部",
-      "latest": "最新值",
       "loss": "丢包",
       "jitter": "波动",
       "statsMedian": "中位数",
@@ -824,12 +766,6 @@
     "traceroute": {
       "title": "路由跟踪"
     },
-    "trends": {
-      "title": "趋势",
-      "interval": "间隔: {{sec}}s",
-      "loadingSeries": "加载序列中...",
-      "seriesError": "序列错误: {{code}}"
-    },
     "snapshot": {
       "load1m": "负载 (1m)",
       "unknownGpu": "未知 GPU"
@@ -837,7 +773,6 @@
   },
   "billing": {
     "overQuota": "超出配额",
-    "periodUsage": "周期用量",
     "periodTraffic": "周期流量"
   },
   "live": {
