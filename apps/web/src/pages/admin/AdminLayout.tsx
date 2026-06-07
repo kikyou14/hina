@@ -50,10 +50,7 @@ export function AdminLayout() {
       <ConnectionBanner status={liveStatus} />
       <header className="border-b">
         <div className="container flex h-14 items-center gap-6">
-          <Link to="/" className="hidden w-55 shrink-0 px-3 font-semibold md:block">
-            {siteName}
-          </Link>
-          <Link to="/" className="px-3 font-semibold md:hidden">
+          <Link to="/" className="font-semibold md:w-55 md:shrink-0">
             {siteName}
           </Link>
           <div className="flex min-w-0 flex-1 items-center justify-end gap-2">
