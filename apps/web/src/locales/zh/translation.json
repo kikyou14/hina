@@ -415,6 +415,10 @@
         "label": "对访客隐藏路由跟踪",
         "saveFailed": "保存设置失败。"
       },
+      "showTotalTraffic": {
+        "label": "在卡片流量轮播中展示历史总流量",
+        "saveFailed": "保存设置失败。"
+      },
       "asnDb": {
         "label": "ASN 数据库 (GeoLite2-ASN)",
         "statusLoaded": "已加载",
@@ -707,7 +711,8 @@
       "expiresIn": "{{days}}天",
       "uptimeDays": "{{days}}天",
       "price": "价格",
-      "resetIn": "{{days}}天后重置"
+      "resetIn": "{{days}}天后重置",
+      "totalTraffic": "累计 {{value}}"
     },
     "table": {
       "name": "名称",
@@ -739,7 +744,9 @@
       "kernel": "内核版本",
       "swapUsed": "交换",
       "lastReport": "最后上报",
-      "none": "无"
+      "none": "无",
+      "totalTraffic": "历史总流量",
+      "totalTrafficSince": "自 {{date}}"
     },
     "cards": {
       "cpu": "CPU",

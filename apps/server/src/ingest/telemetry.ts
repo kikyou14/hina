@@ -20,6 +20,10 @@ export type TelemetryIngestResult = {
   numericMetrics: Record<string, number>;
   deltaRx: number;
   deltaTx: number;
+  // UTC day of the trafficDay row this sample upserted, or null when no row
+  // was written (counter seed / invalid totals). Keeps in-memory lifetime
+  // "since" aligned with MIN(traffic_day.day_yyyymmdd).
+  trafficDayYyyyMmDd: number | null;
 };
 
 function toDayYyyyMmDdUtc(tsMs: number): number {
@@ -135,10 +139,10 @@ async function upsertAgentStatus(tx: DbTx, args: TelemetryIngestArgs, includePac
 async function applyTrafficDelta(
   tx: DbTx,
   args: TelemetryIngestArgs,
-): Promise<{ deltaRx: number; deltaTx: number }> {
+): Promise<{ deltaRx: number; deltaTx: number; trafficDayYyyyMmDd: number | null }> {
   const nowMs = args.recvTsMs;
   if (!Number.isSafeInteger(args.rxBytesTotal) || !Number.isSafeInteger(args.txBytesTotal)) {
-    return { deltaRx: 0, deltaTx: 0 };
+    return { deltaRx: 0, deltaTx: 0, trafficDayYyyyMmDd: null };
   }
 
   const existing = await tx
@@ -158,7 +162,7 @@ async function applyTrafficDelta(
       lastTxBytesTotal: args.txBytesTotal,
       updatedAtMs: nowMs,
     });
-    return { deltaRx: 0, deltaTx: 0 };
+    return { deltaRx: 0, deltaTx: 0, trafficDayYyyyMmDd: null };
   }
 
   const prev = existing[0]!;
@@ -194,7 +198,7 @@ async function applyTrafficDelta(
       },
     });
 
-  return { deltaRx, deltaTx };
+  return { deltaRx, deltaTx, trafficDayYyyyMmDd: day };
 }
 
 async function upsertRollupBucket(
@@ -283,7 +287,7 @@ export async function ingestTelemetryTrafficAndRollup(
   const numericMetrics = extractNumericMetrics(args.numericMetrics);
   const rollupMetrics = extractRollupMetrics(numericMetrics);
 
-  const { deltaRx, deltaTx } = await applyTrafficDelta(tx, args);
+  const { deltaRx, deltaTx, trafficDayYyyyMmDd } = await applyTrafficDelta(tx, args);
 
   for (const intervalSec of listTelemetryIntervalsSec()) {
     await upsertRollupBucket(tx, args, intervalSec, rollupMetrics, deltaRx, deltaTx);
@@ -293,6 +297,7 @@ export async function ingestTelemetryTrafficAndRollup(
     numericMetrics,
     deltaRx,
     deltaTx,
+    trafficDayYyyyMmDd,
   };
 }
 

@@ -11,6 +11,7 @@ export type SiteConfig = {
   timezone: string;
   sortOfflineLast: boolean;
   hideTracerouteForGuests: boolean;
+  showTotalTraffic: boolean;
   publicBaseUrl: string;
   versionCheckEnabled: boolean;
 };
@@ -24,6 +25,7 @@ export const SITE_CONFIG_DEFAULTS: SiteConfig = {
   timezone: process.env.TZ || "Asia/Shanghai",
   sortOfflineLast: false,
   hideTracerouteForGuests: false,
+  showTotalTraffic: false,
   publicBaseUrl: process.env.HINA_PUBLIC_BASE_URL ?? "",
   versionCheckEnabled: true,
 };
@@ -37,6 +39,7 @@ const KV_KEYS = {
   timezone: "site.timezone",
   sortOfflineLast: "site.sortOfflineLast",
   hideTracerouteForGuests: "site.hideTracerouteForGuests",
+  showTotalTraffic: "site.showTotalTraffic",
   publicBaseUrl: "site.publicBaseUrl",
   versionCheckEnabled: "site.versionCheckEnabled",
 } as const;
@@ -55,6 +58,7 @@ export async function loadSiteConfig(db: DbClient): Promise<SiteConfig> {
         eq(appKv.key, KV_KEYS.timezone),
         eq(appKv.key, KV_KEYS.sortOfflineLast),
         eq(appKv.key, KV_KEYS.hideTracerouteForGuests),
+        eq(appKv.key, KV_KEYS.showTotalTraffic),
         eq(appKv.key, KV_KEYS.publicBaseUrl),
         eq(appKv.key, KV_KEYS.versionCheckEnabled),
       )!,
@@ -79,6 +83,8 @@ export async function loadSiteConfig(db: DbClient): Promise<SiteConfig> {
       config.sortOfflineLast = row.value === "true";
     } else if (row.key === KV_KEYS.hideTracerouteForGuests) {
       config.hideTracerouteForGuests = row.value === "true";
+    } else if (row.key === KV_KEYS.showTotalTraffic) {
+      config.showTotalTraffic = row.value === "true";
     } else if (row.key === KV_KEYS.publicBaseUrl) {
       config.publicBaseUrl = row.value || SITE_CONFIG_DEFAULTS.publicBaseUrl;
     } else if (row.key === KV_KEYS.versionCheckEnabled) {

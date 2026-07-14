@@ -58,6 +58,7 @@ function mountPublicRouter(db: DbClient, registry: AgentRegistry) {
     timezone: "UTC",
     sortOfflineLast: false,
     hideTracerouteForGuests: false,
+    showTotalTraffic: false,
     publicBaseUrl: "",
     versionCheckEnabled: false,
   };

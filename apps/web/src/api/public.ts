@@ -17,6 +17,12 @@ export type PublicBilling = {
   overQuota: boolean;
 };
 
+export type PublicAgentTraffic = {
+  totalRxBytes: number;
+  totalTxBytes: number;
+  sinceDayYyyyMmDd: number | null;
+};
+
 export type PublicAgentPricing = {
   currency: string;
   cycle: string;
@@ -41,6 +47,7 @@ export type PublicAgentSummary = {
   system: PublicAgentSystem;
   latest: PublicTelemetry | null;
   billing: PublicBilling | null;
+  traffic: PublicAgentTraffic | null;
   pricing: PublicAgentPricing | null;
 };
 
@@ -56,6 +63,7 @@ export type PublicAgentDetailResponse = {
   inventory: AgentInventory | null;
   latest: PublicTelemetry | null;
   billing: PublicBilling | null;
+  traffic: PublicAgentTraffic | null;
   pricing: PublicAgentPricing | null;
 };
 
@@ -229,6 +237,7 @@ export type PublicSiteConfig = {
   timezone: string;
   sortOfflineLast: boolean;
   hideTracerouteForGuests: boolean;
+  showTotalTraffic: boolean;
   serverVersion: string;
   latestVersion: string | null;
   releaseUrl: string | null;

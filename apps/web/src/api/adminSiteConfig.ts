@@ -9,6 +9,7 @@ export type SiteConfig = {
   timezone: string;
   sortOfflineLast: boolean;
   hideTracerouteForGuests: boolean;
+  showTotalTraffic: boolean;
   publicBaseUrl: string;
   versionCheckEnabled: boolean;
 };

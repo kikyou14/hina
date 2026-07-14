@@ -4,9 +4,10 @@ import { useTranslation } from "react-i18next";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { Timer01Icon, Calendar } from "@hugeicons/core-free-icons";
 
-import type { PublicAgentSummary } from "@/api/public";
+import type { PublicAgentSummary, PublicAgentTraffic } from "@/api/public";
 import { CountryFlag } from "@/components/CountryFlag";
 import { CyclingText } from "@/components/CyclingText";
+import { useSiteConfig } from "@/components/SiteConfigProvider";
 import { OsIcon } from "@/components/OsIcon";
 import { TagBadge } from "@/components/TagBadge";
 import { ResourceBar, MiniBar } from "@/components/ResourceBar";
@@ -101,17 +102,31 @@ const AgentTrafficCell = React.memo(function AgentTrafficCell({
   a: PublicAgentSummary;
   trafficValue: string;
 }) {
+  const { showTotalTraffic } = useSiteConfig();
   const billing = a.billing;
-  if (!billing || billing.quotaBytes <= 0) return <>{trafficValue}</>;
-  return <AgentTrafficCycling trafficValue={trafficValue} billing={billing} />;
+  // An agent with no recorded traffic yet (sinceDay null) falls back to "-".
+  const totalTraffic = a.traffic && a.traffic.sinceDayYyyyMmDd !== null ? a.traffic : null;
+  if (!billing || billing.quotaBytes <= 0) {
+    if (totalTraffic) return <AgentTotalTrafficCycling traffic={totalTraffic} />;
+    return <>{trafficValue}</>;
+  }
+  return (
+    <AgentTrafficCycling
+      trafficValue={trafficValue}
+      billing={billing}
+      totalTraffic={showTotalTraffic ? totalTraffic : null}
+    />
+  );
 });
 
 const AgentTrafficCycling = React.memo(function AgentTrafficCycling({
   trafficValue,
   billing,
+  totalTraffic,
 }: {
   trafficValue: string;
   billing: NonNullable<PublicAgentSummary["billing"]>;
+  totalTraffic: PublicAgentTraffic | null;
 }) {
   const { t } = useTranslation();
 
@@ -128,6 +143,7 @@ const AgentTrafficCycling = React.memo(function AgentTrafficCycling({
     (a, b) => a.index === b.index && a.daysUntilReset === b.daysUntilReset,
   );
 
+  const totalBytes = totalTraffic ? totalTraffic.totalRxBytes + totalTraffic.totalTxBytes : null;
   const variants = React.useMemo<React.ReactNode[]>(() => {
     const items: React.ReactNode[] = [
       trafficValue,
@@ -138,10 +154,39 @@ const AgentTrafficCycling = React.memo(function AgentTrafficCycling({
     if (trafficState.daysUntilReset !== null) {
       items.push(t("publicAgents.card.resetIn", { days: trafficState.daysUntilReset }));
     }
+    if (totalBytes !== null) {
+      items.push(t("publicAgents.card.totalTraffic", { value: formatBytes(totalBytes) }));
+    }
     return items;
-  }, [trafficValue, txBytes, rxBytes, trafficState.daysUntilReset, t]);
+  }, [trafficValue, txBytes, rxBytes, trafficState.daysUntilReset, totalBytes, t]);
 
   return <CyclingText items={variants} index={trafficState.index} />;
+});
+
+const AgentTotalTrafficCycling = React.memo(function AgentTotalTrafficCycling({
+  traffic,
+}: {
+  traffic: PublicAgentTraffic;
+}) {
+  const { t } = useTranslation();
+  const mountMsRef = React.useRef<number | null>(null);
+  const index = useNowValue((nowMs) => {
+    mountMsRef.current ??= nowMs;
+    return Math.floor((nowMs - mountMsRef.current) / TRAFFIC_CYCLE_INTERVAL_MS);
+  });
+
+  const { totalRxBytes, totalTxBytes } = traffic;
+  const variants = React.useMemo<React.ReactNode[]>(
+    () => [
+      t("publicAgents.card.totalTraffic", { value: formatBytes(totalRxBytes + totalTxBytes) }),
+      <>
+        ↑ {formatBytes(totalTxBytes)} ↓ {formatBytes(totalRxBytes)}
+      </>,
+    ],
+    [totalRxBytes, totalTxBytes, t],
+  );
+
+  return <CyclingText items={variants} index={index} />;
 });
 
 export const AgentCard = React.memo(function AgentCard({ a }: { a: PublicAgentSummary }) {

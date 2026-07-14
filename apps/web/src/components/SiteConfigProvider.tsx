@@ -11,6 +11,7 @@ type SiteConfigState = {
   timezone: string;
   sortOfflineLast: boolean;
   hideTracerouteForGuests: boolean;
+  showTotalTraffic: boolean;
   isLoaded: boolean;
 };
 
@@ -23,6 +24,7 @@ const SiteConfigContext = createContext<SiteConfigState>({
   timezone: "Asia/Shanghai",
   sortOfflineLast: false,
   hideTracerouteForGuests: false,
+  showTotalTraffic: false,
   isLoaded: false,
 });
 
@@ -39,6 +41,7 @@ export function SiteConfigProvider({ children }: { children: React.ReactNode }) 
       timezone: data?.timezone || "Asia/Shanghai",
       sortOfflineLast: data?.sortOfflineLast ?? false,
       hideTracerouteForGuests: data?.hideTracerouteForGuests ?? false,
+      showTotalTraffic: data?.showTotalTraffic ?? false,
       isLoaded: !!data,
     }),
     [data],

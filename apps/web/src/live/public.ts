@@ -139,6 +139,7 @@ export function usePublicLiveSync(args?: {
                     system: message.agent.system,
                     latest: message.agent.latest,
                     billing: message.agent.billing,
+                    traffic: message.agent.traffic,
                     pricing: message.agent.pricing,
                   }
                 : current,

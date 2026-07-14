@@ -51,6 +51,7 @@ export function createPublicRouter(touchThrottler: SessionTouchThrottler) {
       faviconVersion: store.faviconVersion,
       sortOfflineLast: config.sortOfflineLast,
       hideTracerouteForGuests: config.hideTracerouteForGuests,
+      showTotalTraffic: config.showTotalTraffic,
       serverVersion: VERSION,
       latestVersion: release?.version ?? null,
       releaseUrl: release?.url ?? null,

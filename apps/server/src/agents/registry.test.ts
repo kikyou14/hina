@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/bun-sqlite";
 import { migrate } from "drizzle-orm/bun-sqlite/migrator";
+import { toYyyyMmDdUtc } from "../billing/billing";
 import type { DbClient } from "../db/client";
 import * as schema from "../db/schema";
 import { getMigrationsFolder } from "../paths";
@@ -181,7 +182,12 @@ describe("AgentRegistry", () => {
 
     applyTelemetryFull("a1", {
       args: baseArgs,
-      result: { numericMetrics: {}, deltaRx: 1024, deltaTx: 2048 },
+      result: {
+        numericMetrics: {},
+        deltaRx: 1024,
+        deltaTx: 2048,
+        trafficDayYyyyMmDd: toYyyyMmDdUtc(baseArgs.recvTsMs),
+      },
     });
 
     const s = registry.getSummary("a1");
@@ -194,7 +200,12 @@ describe("AgentRegistry", () => {
 
     applyTelemetryFull("a1", {
       args: { ...baseArgs, seq: 6, uptimeSec: 124, recvTsMs: baseArgs.recvTsMs + 1000 },
-      result: { numericMetrics: {}, deltaRx: 500, deltaTx: 100 },
+      result: {
+        numericMetrics: {},
+        deltaRx: 500,
+        deltaTx: 100,
+        trafficDayYyyyMmDd: toYyyyMmDdUtc(baseArgs.recvTsMs + 1000),
+      },
     });
     const s2 = registry.getSummary("a1");
     expect(s2?.billing.rxBytes).toBe(1524);
@@ -218,7 +229,7 @@ describe("AgentRegistry", () => {
         latestTelemetryPack: Buffer.alloc(0),
         numericMetrics: {}, // intentionally empty — up_s NOT in m
       },
-      result: { numericMetrics: {}, deltaRx: 0, deltaTx: 0 },
+      result: { numericMetrics: {}, deltaRx: 0, deltaTx: 0, trafficDayYyyyMmDd: null },
     });
     expect(registry.getSummary("a1")?.latest?.uptimeSec).toBe(42);
   });
@@ -238,7 +249,7 @@ describe("AgentRegistry", () => {
         latestTelemetryPack: Buffer.alloc(0),
         numericMetrics: {},
       },
-      result: { numericMetrics: {}, deltaRx: 0, deltaTx: 0 },
+      result: { numericMetrics: {}, deltaRx: 0, deltaTx: 0, trafficDayYyyyMmDd: null },
     });
     expect(registry.getSummary("a1")?.latest?.uptimeSec).toBeNull();
   });
@@ -261,7 +272,7 @@ describe("AgentRegistry", () => {
         latestTelemetryPack: Buffer.alloc(0),
         numericMetrics: {},
       },
-      result: { numericMetrics: {}, deltaRx: 1000, deltaTx: 1000 },
+      result: { numericMetrics: {}, deltaRx: 1000, deltaTx: 1000, trafficDayYyyyMmDd: 20260131 },
     });
     expect(registry.getSummary("a1", beforeReset)?.billing.rxBytes).toBe(1000);
 
@@ -276,11 +287,99 @@ describe("AgentRegistry", () => {
         latestTelemetryPack: Buffer.alloc(0),
         numericMetrics: {},
       },
-      result: { numericMetrics: {}, deltaRx: 500, deltaTx: 500 },
+      result: { numericMetrics: {}, deltaRx: 500, deltaTx: 500, trafficDayYyyyMmDd: 20260201 },
     });
     const s = registry.getSummary("a1", afterReset);
     expect(s?.billing.rxBytes).toBe(500);
     expect(s?.billing.txBytes).toBe(500);
+
+    // Lifetime totals accumulate across the rollover instead of resetting.
+    expect(s?.traffic.totalRxBytes).toBe(1500);
+    expect(s?.traffic.totalTxBytes).toBe(1500);
+    expect(s?.traffic.sinceDayYyyyMmDd).toBe(20260131);
+  });
+
+  test("counter-seeding sample (no trafficDay write) does not set the lifetime since-day", async () => {
+    await seedAgent(db, { id: "a1", name: "alpha" });
+    await registry.load();
+
+    const seedAtMs = Date.UTC(2026, 0, 15, 12, 0, 0);
+    applyTelemetryFull("a1", {
+      args: {
+        agentId: "a1",
+        recvTsMs: seedAtMs,
+        seq: 1,
+        uptimeSec: 1,
+        rxBytesTotal: 5000,
+        txBytesTotal: 5000,
+        latestTelemetryPack: Buffer.alloc(0),
+        numericMetrics: {},
+      },
+      result: { numericMetrics: {}, deltaRx: 0, deltaTx: 0, trafficDayYyyyMmDd: null },
+    });
+
+    // The first sample only seeds the counter baseline: no trafficDay row
+    // exists, so the since-day must stay null (matching MIN(day) on reload).
+    let s = registry.getSummary("a1", seedAtMs);
+    expect(s?.traffic).toEqual({ totalRxBytes: 0, totalTxBytes: 0, sinceDayYyyyMmDd: null });
+
+    applyTelemetryFull("a1", {
+      args: {
+        agentId: "a1",
+        recvTsMs: seedAtMs + 60_000,
+        seq: 2,
+        uptimeSec: 61,
+        rxBytesTotal: 6000,
+        txBytesTotal: 5500,
+        latestTelemetryPack: Buffer.alloc(0),
+        numericMetrics: {},
+      },
+      result: { numericMetrics: {}, deltaRx: 1000, deltaTx: 500, trafficDayYyyyMmDd: 20260115 },
+    });
+
+    s = registry.getSummary("a1", seedAtMs + 60_000);
+    expect(s?.traffic).toEqual({
+      totalRxBytes: 1000,
+      totalTxBytes: 500,
+      sinceDayYyyyMmDd: 20260115,
+    });
+  });
+
+  test("load() aggregates lifetime traffic totals across all trafficDay rows", async () => {
+    await seedAgent(db, { id: "a1", name: "alpha" });
+    const nowMs = Date.now();
+    const todayDay = toYyyyMmDdUtc(nowMs);
+    await db.insert(schema.trafficDay).values([
+      { agentId: "a1", dayYyyyMmDd: 20200101, rxBytes: 700, txBytes: 300, updatedAtMs: nowMs },
+      { agentId: "a1", dayYyyyMmDd: todayDay, rxBytes: 40, txBytes: 60, updatedAtMs: nowMs },
+    ]);
+    await registry.load();
+
+    const s = registry.getSummary("a1", nowMs);
+    // Billing only counts the current period; lifetime counts everything.
+    expect(s?.billing.rxBytes).toBe(40);
+    expect(s?.billing.txBytes).toBe(60);
+    expect(s?.traffic.totalRxBytes).toBe(740);
+    expect(s?.traffic.totalTxBytes).toBe(360);
+    expect(s?.traffic.sinceDayYyyyMmDd).toBe(20200101);
+  });
+
+  test("ensureAgent() loads lifetime traffic totals", async () => {
+    await seedAgent(db, { id: "a1", name: "alpha" });
+    const nowMs = Date.now();
+    await db
+      .insert(schema.trafficDay)
+      .values([
+        { agentId: "a1", dayYyyyMmDd: 20200101, rxBytes: 10, txBytes: 20, updatedAtMs: nowMs },
+      ]);
+
+    expect(await registry.ensureAgent("a1")).toBe(true);
+    const s = registry.getSummary("a1", nowMs);
+    expect(s?.traffic).toEqual({
+      totalRxBytes: 10,
+      totalTxBytes: 20,
+      sinceDayYyyyMmDd: 20200101,
+    });
   });
 
   test("syncPricingFromDb() mirrors the DB pricing row into the registry", async () => {
@@ -629,7 +728,12 @@ describe("AgentRegistry", () => {
           latestTelemetryPack: Buffer.alloc(0),
           numericMetrics: {},
         },
-        result: { numericMetrics: {}, deltaRx: 500, deltaTx: 500 },
+        result: {
+          numericMetrics: {},
+          deltaRx: 500,
+          deltaTx: 500,
+          trafficDayYyyyMmDd: toYyyyMmDdUtc(sampleAtMs),
+        },
       });
 
       const s = registry.getSummary("a1", sampleAtMs);
@@ -659,7 +763,12 @@ describe("AgentRegistry", () => {
           latestTelemetryPack: Buffer.alloc(0),
           numericMetrics: {},
         },
-        result: { numericMetrics: {}, deltaRx: 111, deltaTx: 222 },
+        result: {
+          numericMetrics: {},
+          deltaRx: 111,
+          deltaTx: 222,
+          trafficDayYyyyMmDd: toYyyyMmDdUtc(sampleAtMs),
+        },
       });
 
       const s = registry.getSummary("a1", sampleAtMs);
@@ -1034,6 +1143,7 @@ describe("AgentRegistry", () => {
         result: {
           deltaRx: 0,
           deltaTx: 0,
+          trafficDayYyyyMmDd: null,
           numericMetrics: {
             "cpu.usage_pct": 42.5,
             "mem.used_pct": Number.NaN,
@@ -1104,7 +1214,7 @@ describe("AgentRegistry", () => {
           latestTelemetryPack: Buffer.alloc(0),
           numericMetrics: {},
         },
-        result: { numericMetrics: {}, deltaRx: 3000, deltaTx: 4000 },
+        result: { numericMetrics: {}, deltaRx: 3000, deltaTx: 4000, trafficDayYyyyMmDd: 20260415 },
       });
 
       const view = registry.listForAlert(recvTsMs).find((v) => v.id === "a1");

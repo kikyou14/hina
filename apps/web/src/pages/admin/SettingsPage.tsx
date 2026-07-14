@@ -20,6 +20,7 @@ import { DbPanel } from "./components/DbPanel";
 import { HideTracerouteToggle } from "./components/HideTracerouteToggle";
 import { PublicBaseUrlInput } from "./components/PublicBaseUrlInput";
 import { RuntimeAgentConfigForm } from "./components/RuntimeAgentConfigForm";
+import { ShowTotalTrafficToggle } from "./components/ShowTotalTrafficToggle";
 import { SiteConfigForm } from "./components/SiteConfigForm";
 import { SortOfflineToggle } from "./components/SortOfflineToggle";
 import { VersionPanel } from "./components/VersionPanel";
@@ -132,6 +133,7 @@ export function SettingsPage() {
               <PublicBaseUrlInput />
               <SortOfflineToggle />
               <HideTracerouteToggle />
+              <ShowTotalTrafficToggle />
             </CardContent>
           </Card>
 

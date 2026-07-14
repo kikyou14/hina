@@ -8,7 +8,7 @@ import {
   type AgentBillingResult,
   type BillingConfig,
 } from "../billing/billing";
-import { queryTrafficRows } from "../billing/query";
+import { queryTrafficRows, queryTrafficTotals } from "../billing/query";
 import type { DbClient } from "../db/client";
 import { agent, agentBilling, agentGroup, agentPricing, agentStatus } from "../db/schema";
 import type { GeoResult } from "../geo/lookup";
@@ -37,6 +37,12 @@ export type AgentLatestWire = {
   m: Record<string, unknown>;
 };
 
+export type AgentTrafficTotals = {
+  totalRxBytes: number;
+  totalTxBytes: number;
+  sinceDayYyyyMmDd: number | null;
+};
+
 export type AgentPublicSummary = {
   id: string;
   name: string;
@@ -48,6 +54,7 @@ export type AgentPublicSummary = {
   system: PublicAgentSystemView;
   latest: AgentLatestWire | null;
   billing: AgentBillingResult;
+  traffic: AgentTrafficTotals;
   pricing: AgentPricingWire | null;
 };
 
@@ -122,6 +129,9 @@ type AgentEntry = {
   periodStartDayYyyyMmDd: number;
   periodRxBytes: number;
   periodTxBytes: number;
+  totalRxBytes: number;
+  totalTxBytes: number;
+  totalSinceDayYyyyMmDd: number | null;
   pendingPeriodRefresh: boolean;
   pricing: AgentPricingWire | null;
 };
@@ -218,6 +228,12 @@ function compareEntries(a: AgentEntry, b: AgentEntry): number {
   return a.name.localeCompare(b.name);
 }
 
+const EMPTY_TRAFFIC_TOTALS: AgentTrafficTotals = {
+  totalRxBytes: 0,
+  totalTxBytes: 0,
+  sinceDayYyyyMmDd: null,
+};
+
 export class AgentRegistry {
   private readonly db: DbClient;
   private readonly entries = new Map<string, AgentEntry>();
@@ -243,15 +259,14 @@ export class AgentRegistry {
       if (periodStart < earliestPeriodStart) earliestPeriodStart = periodStart;
     }
 
-    const trafficRows =
+    const agentIds = rows.map((r) => r.id);
+    const [trafficRows, totalsRows] =
       rows.length > 0
-        ? await queryTrafficRows(
-            this.db,
-            rows.map((r) => r.id),
-            earliestPeriodStart,
-            todayDay,
-          )
-        : [];
+        ? await Promise.all([
+            queryTrafficRows(this.db, agentIds, earliestPeriodStart, todayDay),
+            queryTrafficTotals(this.db, agentIds),
+          ])
+        : [[], []];
 
     const trafficByAgent = new Map<string, { rx: number; tx: number }>();
     for (const tr of trafficRows) {
@@ -265,11 +280,21 @@ export class AgentRegistry {
       trafficByAgent.set(tr.agentId, agg);
     }
 
+    const totalsByAgent = new Map<string, AgentTrafficTotals>();
+    for (const row of totalsRows) {
+      totalsByAgent.set(row.agentId, {
+        totalRxBytes: row.totalRxBytes,
+        totalTxBytes: row.totalTxBytes,
+        sinceDayYyyyMmDd: row.sinceDayYyyyMmDd,
+      });
+    }
+
     this.entries.clear();
     for (const r of rows) {
       const config = billingConfigs.get(r.id)!;
       const traffic = trafficByAgent.get(r.id) ?? { rx: 0, tx: 0 };
-      this.entries.set(r.id, this.buildEntry(r, config, traffic, nowMs));
+      const totals = totalsByAgent.get(r.id) ?? EMPTY_TRAFFIC_TOTALS;
+      this.entries.set(r.id, this.buildEntry(r, config, traffic, totals, nowMs));
     }
   }
 
@@ -321,13 +346,24 @@ export class AgentRegistry {
       const nowMs = Date.now();
       const periodStart = computePeriodStartYyyyMmDdUtc(nowMs, config.resetDay);
       const todayDay = toYyyyMmDdUtc(nowMs);
-      const trafficRows = await queryTrafficRows(this.db, [agentId], periodStart, todayDay);
+      const [trafficRows, totalsRows] = await Promise.all([
+        queryTrafficRows(this.db, [agentId], periodStart, todayDay),
+        queryTrafficTotals(this.db, [agentId]),
+      ]);
       let rx = 0;
       let tx = 0;
       for (const tr of trafficRows) {
         rx += tr.rxBytes;
         tx += tr.txBytes;
       }
+      const totalsRow = totalsRows[0];
+      const totals: AgentTrafficTotals = totalsRow
+        ? {
+            totalRxBytes: totalsRow.totalRxBytes,
+            totalTxBytes: totalsRow.totalTxBytes,
+            sinceDayYyyyMmDd: totalsRow.sinceDayYyyyMmDd,
+          }
+        : EMPTY_TRAFFIC_TOTALS;
 
       const verify = await this.db
         .select({ id: agent.id })
@@ -336,7 +372,7 @@ export class AgentRegistry {
         .limit(1);
       if (verify.length === 0) return false;
 
-      this.entries.set(agentId, this.buildEntry(r, config, { rx, tx }, nowMs));
+      this.entries.set(agentId, this.buildEntry(r, config, { rx, tx }, totals, nowMs));
       return true;
     });
   }
@@ -398,6 +434,7 @@ export class AgentRegistry {
     r: Awaited<ReturnType<AgentRegistry["buildBaseQuery"]>>[number],
     config: BillingConfig,
     traffic: { rx: number; tx: number },
+    totals: AgentTrafficTotals,
     nowMs: number,
   ): AgentEntry {
     const periodStart = computePeriodStartYyyyMmDdUtc(nowMs, config.resetDay);
@@ -429,6 +466,9 @@ export class AgentRegistry {
       periodStartDayYyyyMmDd: periodStart,
       periodRxBytes: traffic.rx,
       periodTxBytes: traffic.tx,
+      totalRxBytes: totals.totalRxBytes,
+      totalTxBytes: totals.totalTxBytes,
+      totalSinceDayYyyyMmDd: totals.sinceDayYyyyMmDd,
       pendingPeriodRefresh: false,
       pricing: buildAgentPricing({
         pricingCurrency: r.pricingCurrency,
@@ -469,6 +509,9 @@ export class AgentRegistry {
       periodStartDayYyyyMmDd: periodStart,
       periodRxBytes: 0,
       periodTxBytes: 0,
+      totalRxBytes: 0,
+      totalTxBytes: 0,
+      totalSinceDayYyyyMmDd: null,
       pendingPeriodRefresh: false,
       pricing: args.pricing,
     });
@@ -615,6 +658,15 @@ export class AgentRegistry {
     }
     entry.periodRxBytes += result.deltaRx;
     entry.periodTxBytes += result.deltaTx;
+
+    // Lifetime totals never reset with the billing period. The since-day only
+    // initializes from an actual trafficDay write, matching MIN(day) on reload
+    // (a counter-seeding first sample writes no row and must not set it).
+    entry.totalRxBytes += result.deltaRx;
+    entry.totalTxBytes += result.deltaTx;
+    if (entry.totalSinceDayYyyyMmDd === null && result.trafficDayYyyyMmDd !== null) {
+      entry.totalSinceDayYyyyMmDd = result.trafficDayYyyyMmDd;
+    }
   }
 
   applyTelemetryLatest(agentId: string, apply: TelemetryApplyArgs): void {
@@ -805,6 +857,11 @@ export class AgentRegistry {
       }),
       latest: entry.latest,
       billing: this.buildBilling(entry, nowMs),
+      traffic: {
+        totalRxBytes: entry.totalRxBytes,
+        totalTxBytes: entry.totalTxBytes,
+        sinceDayYyyyMmDd: entry.totalSinceDayYyyyMmDd,
+      },
       pricing: entry.pricing,
     };
   }

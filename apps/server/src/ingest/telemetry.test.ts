@@ -72,24 +72,27 @@ describe("telemetry ingest split", () => {
     await seedAgent(db, "a1");
 
     // First sample seeds the trafficCounter baseline (delta=0, no trafficDay row).
-    await db.transaction(async (tx) => {
-      await ingestTelemetryTrafficAndRollup(
+    const seedResult = await db.transaction((tx) =>
+      ingestTelemetryTrafficAndRollup(
         tx,
         telemetryArgs("a1", { seq: 1, rxBytesTotal: 0, txBytesTotal: 0 }),
-      );
-    });
+      ),
+    );
+    expect(seedResult.trafficDayYyyyMmDd).toBeNull();
 
     // Pretend the agent has just disconnected: close() wrote markOffline.
     await db.transaction((tx) => markAgentOffline(tx, "a1", 1_000_000));
 
     // Second sample (buffered just before disconnect) should flush its traffic
     // delta into trafficDay/rollup WITHOUT flipping agentStatus back online.
-    await db.transaction(async (tx) => {
-      await ingestTelemetryTrafficAndRollup(
+    const flushResult = await db.transaction((tx) =>
+      ingestTelemetryTrafficAndRollup(
         tx,
         telemetryArgs("a1", { seq: 2, rxBytesTotal: 1024, txBytesTotal: 2048 }),
-      );
-    });
+      ),
+    );
+    // recvTsMs 1_700_000_000_000 falls on 2023-11-14 UTC.
+    expect(flushResult.trafficDayYyyyMmDd).toBe(20231114);
 
     const traffic = await db.select().from(schema.trafficDay);
     expect(traffic).toHaveLength(1);

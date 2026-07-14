@@ -39,6 +39,7 @@ export function registerAdminSiteConfigRoutes(router: Hono<AppContext>) {
       timezone: string;
       sortOfflineLast: boolean;
       hideTracerouteForGuests: boolean;
+      showTotalTraffic: boolean;
       publicBaseUrl: string;
       versionCheckEnabled: boolean;
     }> = {};
@@ -72,6 +73,13 @@ export function registerAdminSiteConfigRoutes(router: Hono<AppContext>) {
         return c.json({ code: "invalid_hideTracerouteForGuests" }, 400);
       }
       patch.hideTracerouteForGuests = body.hideTracerouteForGuests;
+    }
+
+    if (body.showTotalTraffic !== undefined) {
+      if (typeof body.showTotalTraffic !== "boolean") {
+        return c.json({ code: "invalid_showTotalTraffic" }, 400);
+      }
+      patch.showTotalTraffic = body.showTotalTraffic;
     }
 
     if (body.versionCheckEnabled !== undefined) {

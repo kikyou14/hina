@@ -1,6 +1,7 @@
 import * as React from "react";
 import { useTranslation } from "react-i18next";
 import {
+  ArrowUpDown,
   Box,
   Clock,
   Cpu,
@@ -17,7 +18,7 @@ import {
 
 import { Badge } from "@/components/ui/badge";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import type { PublicAgentDetailResponse } from "@/api/public";
+import type { PublicAgentDetailResponse, PublicAgentTraffic } from "@/api/public";
 import { useSiteConfig } from "@/components/SiteConfigProvider";
 import { formatBytes } from "@/lib/format";
 import { useNowTicker } from "@/hooks/useNowTicker";
@@ -89,6 +90,34 @@ function TrafficBar(props: {
 
 function DashedDivider() {
   return <div className="mx-3 my-1 border-t border-dashed border-border" />;
+}
+
+function formatDayYyyyMmDd(day: number): string {
+  const yyyy = Math.floor(day / 10000);
+  const mm = Math.floor((day % 10000) / 100);
+  const dd = day % 100;
+  return `${yyyy}-${String(mm).padStart(2, "0")}-${String(dd).padStart(2, "0")}`;
+}
+
+function TotalTrafficRow(props: { traffic: PublicAgentTraffic | null }) {
+  const { t } = useTranslation();
+  const { traffic } = props;
+  // Hidden until the agent has recorded traffic at least once.
+  if (!traffic || traffic.sinceDayYyyyMmDd === null) return null;
+
+  const directions = `↑ ${formatBytes(traffic.totalTxBytes)} ↓ ${formatBytes(traffic.totalRxBytes)}`;
+  const since = t("publicAgent.overview.totalTrafficSince", {
+    date: formatDayYyyyMmDd(traffic.sinceDayYyyyMmDd),
+  });
+
+  return (
+    <StatRow
+      icon={<ArrowUpDown className="size-3.5" />}
+      label={t("publicAgent.overview.totalTraffic")}
+      value={formatBytes(traffic.totalRxBytes + traffic.totalTxBytes)}
+      sub={`${directions} · ${since}`}
+    />
+  );
 }
 
 export function AgentInfoSidebar(props: {
@@ -217,6 +246,12 @@ export function AgentInfoSidebar(props: {
                   label={t("billing.periodTraffic")}
                   overQuotaLabel={t("billing.overQuota")}
                 />
+                <TotalTrafficRow traffic={agent.traffic} />
+              </>
+            ) : agent?.traffic && agent.traffic.sinceDayYyyyMmDd !== null ? (
+              <>
+                <DashedDivider />
+                <TotalTrafficRow traffic={agent.traffic} />
               </>
             ) : null}
 

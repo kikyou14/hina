@@ -415,6 +415,10 @@
         "label": "Hide traceroute from guests",
         "saveFailed": "Failed to save setting."
       },
+      "showTotalTraffic": {
+        "label": "Show total traffic in the card traffic cycle",
+        "saveFailed": "Failed to save setting."
+      },
       "asnDb": {
         "label": "ASN Database (GeoLite2-ASN)",
         "statusLoaded": "Loaded",
@@ -707,7 +711,8 @@
       "expiresIn": "{{days}}d",
       "uptimeDays": "{{days}}d",
       "price": "Price",
-      "resetIn": "Resets in {{days}}d"
+      "resetIn": "Resets in {{days}}d",
+      "totalTraffic": "Total {{value}}"
     },
     "table": {
       "name": "Name",
@@ -739,7 +744,9 @@
       "kernel": "Kernel",
       "swapUsed": "Swap",
       "lastReport": "Last report",
-      "none": "None"
+      "none": "None",
+      "totalTraffic": "Total traffic",
+      "totalTrafficSince": "since {{date}}"
     },
     "cards": {
       "cpu": "CPU",
