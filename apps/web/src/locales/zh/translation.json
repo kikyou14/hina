@@ -763,7 +763,7 @@
       "noLatencyTasks": "暂无延迟探测数据。",
       "loadingTitle": "正在整理延迟历史",
       "loadingDescription": "正在同步最近 {{window}} 的数据...",
-      "symlog": "Symlog",
+      "smooth": "平滑",
       "loss": "丢包",
       "jitter": "波动",
       "statsMedian": "中位数",

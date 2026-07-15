@@ -763,7 +763,7 @@
       "noLatencyTasks": "No latency probe data.",
       "loadingTitle": "Preparing latency history",
       "loadingDescription": "Syncing {{window}} data...",
-      "symlog": "Symlog",
+      "smooth": "Smooth",
       "loss": "Loss",
       "jitter": "Jitter",
       "statsMedian": "median",

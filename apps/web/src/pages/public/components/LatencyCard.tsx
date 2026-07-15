@@ -24,6 +24,7 @@ import {
   type LatencySeriesPoint,
   PROBE_LINE_COLORS,
   type ProbeTaskStats,
+  smoothLatencySeries,
 } from "../lib/latencyChart";
 import { formatLocalDateTime, formatMsNumber } from "../lib/chartHelpers";
 import { LATENCY_WINDOWS, type LatencyWindow } from "../lib/timeWindows";
@@ -56,12 +57,20 @@ function CustomTooltip({
 }
 
 const AXIS_TICK_FILL = "var(--color-muted-foreground)";
+const SMOOTH_STORAGE_KEY = "hina.public.latencySmooth";
+
+function readStoredSmooth(): boolean {
+  try {
+    return localStorage.getItem(SMOOTH_STORAGE_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
 
 function LatencyLineChart(props: {
   data: readonly { t: number }[];
   lines: readonly LatencyLineSpec[];
   xTickFormatter: (tsMs: number) => string;
-  symlog: boolean;
 }) {
   return (
     <ResponsiveContainer width="100%" height="100%">
@@ -87,7 +96,6 @@ function LatencyLineChart(props: {
           axisLine={false}
           tickFormatter={(v) => `${v} ms`}
           width={55}
-          scale={props.symlog ? "symlog" : "auto"}
           domain={[0, "auto"]}
         />
         <Tooltip content={<CustomTooltip />} />
@@ -305,7 +313,15 @@ function LatencyLoadingOverlay(props: { window: LatencyWindow }) {
 
 export const LatencyCard = React.memo(function LatencyCard(props: LatencyCardProps) {
   const { t } = useTranslation();
-  const [symlog, setSymlog] = React.useState(false);
+  const [smooth, setSmooth] = React.useState(readStoredSmooth);
+  const toggleSmooth = (pressed: boolean) => {
+    setSmooth(pressed);
+    try {
+      localStorage.setItem(SMOOTH_STORAGE_KEY, pressed ? "1" : "0");
+    } catch {
+      // Persistence is best-effort; in-memory state still updates.
+    }
+  };
   const {
     probeLatestLoading,
     probeLatestError,
@@ -322,6 +338,14 @@ export const LatencyCard = React.memo(function LatencyCard(props: LatencyCardPro
     latencySeriesLoading,
     firstProbeSeriesError,
   } = props;
+
+  const displayLines = React.useMemo(
+    () =>
+      smooth
+        ? latencyLines.map((line) => ({ ...line, data: smoothLatencySeries(line.data) }))
+        : latencyLines,
+    [latencyLines, smooth],
+  );
 
   const renderContent = (): React.ReactNode => {
     if (probeLatestError) {
@@ -353,9 +377,8 @@ export const LatencyCard = React.memo(function LatencyCard(props: LatencyCardPro
     return (
       <MemoLatencyLineChart
         data={latencyChartData}
-        lines={latencyLines}
+        lines={displayLines}
         xTickFormatter={latencyXTickFormatter}
-        symlog={symlog}
       />
     );
   };
@@ -371,8 +394,8 @@ export const LatencyCard = React.memo(function LatencyCard(props: LatencyCardPro
             <h2 className="text-sm font-semibold uppercase tracking-wider">{t("publicAgent.tabs.latency")}</h2>
           </div>
           <div className="flex items-center gap-2">
-            <Toggle size="sm" pressed={symlog} onPressedChange={setSymlog}>
-              {t("publicAgent.latency.symlog")}
+            <Toggle size="sm" pressed={smooth} onPressedChange={toggleSmooth}>
+              {t("publicAgent.latency.smooth")}
             </Toggle>
             <TimeRangeSelector value={latencyWindow} onChange={setLatencyWindow} windows={LATENCY_WINDOWS} />
           </div>
