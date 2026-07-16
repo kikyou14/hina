@@ -183,6 +183,7 @@
     "tags": {
       "add": "添加标签",
       "addButton": "添加",
+      "copy": "复制标签 {{tag}}",
       "remove": "删除 {{tag}}"
     },
     "pricing": {

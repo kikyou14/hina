@@ -183,6 +183,7 @@
     "tags": {
       "add": "Add tag",
       "addButton": "Add",
+      "copy": "Copy tag {{tag}}",
       "remove": "Remove {{tag}}"
     },
     "pricing": {

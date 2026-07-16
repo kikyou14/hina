@@ -2,6 +2,7 @@ import { Cancel01Icon, Add01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import * as React from "react";
 import { useTranslation } from "react-i18next";
+import { toast } from "sonner";
 import { TagBadge } from "@/components/TagBadge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -34,13 +35,30 @@ export function TagEditor({
     onChange(tags.filter((_, i) => i !== index));
   };
 
+  const handleCopy = async (tag: string) => {
+    try {
+      await navigator.clipboard.writeText(tag);
+      toast.success(t("common.copied"));
+    } catch {
+      toast.error(t("common.copyFailed"));
+    }
+  };
+
   return (
     <div className="grid gap-2">
       {tags.length > 0 && (
         <div className="flex flex-wrap gap-1.5">
           {tags.map((tag, i) => (
             <span key={tag} className="group relative">
-              <TagBadge tag={tag} />
+              <button
+                type="button"
+                aria-label={t("agents.tags.copy", { tag })}
+                title={tag}
+                onClick={() => handleCopy(tag)}
+                className="focus-visible:ring-ring/50 inline-flex cursor-pointer rounded-full transition-opacity outline-none hover:opacity-80 focus-visible:ring-[3px]"
+              >
+                <TagBadge tag={tag} />
+              </button>
               {!disabled && (
                 <button
                   type="button"
