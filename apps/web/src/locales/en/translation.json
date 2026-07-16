@@ -744,9 +744,7 @@
       "kernel": "Kernel",
       "swapUsed": "Swap",
       "lastReport": "Last report",
-      "none": "None",
-      "totalTraffic": "Total traffic",
-      "totalTrafficSince": "since {{date}}"
+      "none": "None"
     },
     "cards": {
       "cpu": "CPU",

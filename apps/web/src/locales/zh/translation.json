@@ -744,9 +744,7 @@
       "kernel": "内核版本",
       "swapUsed": "交换",
       "lastReport": "最后上报",
-      "none": "无",
-      "totalTraffic": "历史总流量",
-      "totalTrafficSince": "自 {{date}}"
+      "none": "无"
     },
     "cards": {
       "cpu": "CPU",
