@@ -22,6 +22,8 @@ import { startProbeRollupWorker } from "./rollup/probe";
 import { startTelemetryRollupWorker } from "./rollup/telemetry";
 import { RuntimeAgentConfigStore, loadRuntimeAgentConfig } from "./settings/runtime";
 import { SiteConfigStore, loadSiteConfig } from "./settings/site-config";
+import { createShutdown } from "./shutdown";
+import { ActivityGate } from "./util/activity-gate";
 import { configureTrustedProxies, resolveClientIp } from "./util/trust-proxy";
 import { VERSION } from "./version";
 import { startVersionCheck, stopVersionCheck } from "./version-check";
@@ -130,34 +132,43 @@ function toLiveSocket(ws: ServerWebSocket<SocketData>): ServerWebSocket<BrowserL
   return ws as ServerWebSocket<BrowserLiveWsData>;
 }
 
+const requestActivity = new ActivityGate();
+
 const server = Bun.serve<SocketData>({
   port: config.port,
   async fetch(req, server) {
-    const url = new URL(req.url);
-
-    if (
-      url.pathname === "/ws" ||
-      url.pathname === "/live/public" ||
-      url.pathname === "/live/admin"
-    ) {
-      const ip = resolveClientIp(req, server.requestIP(req)?.address) ?? "unknown";
-      const limiter = url.pathname === "/ws" ? agentUpgradeLimiter : liveUpgradeLimiter;
-      if (!limiter.check(ip)) {
-        return new Response("Too Many Requests", { status: 429 });
-      }
-    }
+    const release = requestActivity.tryEnter();
+    if (!release) return new Response("Service Unavailable", { status: 503 });
 
     try {
-      if (url.pathname === "/ws") return wsHub.handleUpgrade(req, toAgentServer(server));
-      if (url.pathname === "/live/public")
-        return await liveHub.handlePublicUpgrade(req, toLiveServer(server));
-      if (url.pathname === "/live/admin")
-        return await liveHub.handleAdminUpgrade(req, toLiveServer(server));
-    } catch (err) {
-      console.error(`WebSocket upgrade failed: ${url.pathname}`, err);
-      return new Response("Internal Server Error", { status: 500 });
+      const url = new URL(req.url);
+
+      if (
+        url.pathname === "/ws" ||
+        url.pathname === "/live/public" ||
+        url.pathname === "/live/admin"
+      ) {
+        const ip = resolveClientIp(req, server.requestIP(req)?.address) ?? "unknown";
+        const limiter = url.pathname === "/ws" ? agentUpgradeLimiter : liveUpgradeLimiter;
+        if (!limiter.check(ip)) {
+          return new Response("Too Many Requests", { status: 429 });
+        }
+      }
+
+      try {
+        if (url.pathname === "/ws") return wsHub.handleUpgrade(req, toAgentServer(server));
+        if (url.pathname === "/live/public")
+          return await liveHub.handlePublicUpgrade(req, toLiveServer(server));
+        if (url.pathname === "/live/admin")
+          return await liveHub.handleAdminUpgrade(req, toLiveServer(server));
+      } catch (err) {
+        console.error(`WebSocket upgrade failed: ${url.pathname}`, err);
+        return new Response("Internal Server Error", { status: 500 });
+      }
+      return await app.fetch(req, { connectionIp: server.requestIP(req)?.address });
+    } finally {
+      release();
     }
-    return app.fetch(req, { connectionIp: server.requestIP(req)?.address });
   },
   websocket: {
     maxPayloadLength: MAX_WS_PAYLOAD_BYTES,
@@ -187,41 +198,35 @@ const server = Bun.serve<SocketData>({
 
 console.log(`hina-server v${VERSION} listening on :${config.port}`);
 
-const SHUTDOWN_TIMEOUT_MS = 10_000;
-
-function withTimeout(promise: Promise<unknown>, ms: number, label: string): Promise<void> {
-  return new Promise<void>((resolve) => {
-    const timer = setTimeout(() => {
-      console.warn(`${label} timed out after ${ms}ms, forcing exit`);
-      resolve();
-    }, ms);
-    promise
-      .catch((err) => console.error(`${label} failed`, err))
-      .finally(() => {
-        clearTimeout(timer);
-        resolve();
-      });
-  });
-}
-
-let shuttingDown = false;
-async function shutdown(signal: string, exitCode = 0) {
-  if (shuttingDown) return;
-  shuttingDown = true;
-  console.log(`shutting down (${signal})...`);
-  agentUpgradeLimiter.stop();
-  liveUpgradeLimiter.stop();
-  await withTimeout(server.stop(true), SHUTDOWN_TIMEOUT_MS, "server.stop");
-  await withTimeout(wsHub.stop(), SHUTDOWN_TIMEOUT_MS, "wsHub.stop");
-  await withTimeout(
-    Promise.all(stopWorkers.map((stop) => stop())),
-    SHUTDOWN_TIMEOUT_MS,
-    "workers.stop",
-  );
-  await withTimeout(dbMaintenance.close(), SHUTDOWN_TIMEOUT_MS, "dbMaintenance.close");
-  closeDbClient(db);
-  process.exit(exitCode);
-}
+// Keep Bun's network shutdown budget separate so a runtime or socket regression
+// cannot consume the deadline reserved for draining application work.
+const shutdown = createShutdown(
+  {
+    quiesce() {
+      requestActivity.quiesce();
+      wsHub.quiesce();
+      agentUpgradeLimiter.stop();
+      liveUpgradeLimiter.stop();
+    },
+    stopServer: () => server.stop(true),
+    getPendingServerActivity: () => ({
+      requests: server.pendingRequests,
+      websockets: server.pendingWebSockets,
+    }),
+    drainRequests: () => requestActivity.waitForIdle(),
+    stopHub: () => wsHub.stop(),
+    stopWorkers: () => Promise.all(stopWorkers.map((stop) => stop())),
+    closeMaintenance: () => dbMaintenance.close(),
+    closeDb: () => closeDbClient(db),
+    exit: (exitCode) => process.exit(exitCode),
+    logger: console,
+  },
+  {
+    serverStopTimeoutMs: 500,
+    shutdownDeadlineMs: 8_000,
+    dbCloseReserveMs: 250,
+  },
+);
 let rejectionCount = 0;
 let rejectionWindowStart = Date.now();
 process.on("unhandledRejection", (reason) => {

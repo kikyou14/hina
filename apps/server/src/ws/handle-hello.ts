@@ -16,7 +16,7 @@ import { safeJsonStringify } from "../util/lang";
 import { resolveAndPublishAgentGeo } from "./geo";
 import type { AgentWsData } from "./hub";
 import { capabilitySupportsTracerouteTcpSizePair } from "./probe-config";
-import { enqueueOrLog, normalizeOptionalString, sendAndClose } from "./util";
+import { normalizeOptionalString, sendAndClose } from "./util";
 
 const wsLog = createLogger("ws");
 
@@ -34,6 +34,7 @@ export type HelloHandlerDeps = {
   connections: Map<string, ServerWebSocket<AgentWsData>>;
   buildRuntimeConfigBody: () => RuntimeConfigBody;
   pushProbeConfig: (agentId: string) => Promise<boolean>;
+  trackTask: (task: Promise<unknown>, label: string) => void;
 };
 
 export async function handleHello(
@@ -124,7 +125,7 @@ async function handleHelloInner(
   const arch = normalizeOptionalString(hello.arch);
   const agentVersion = normalizeOptionalString(hello.ver);
 
-  enqueueOrLog(
+  deps.trackTask(
     deps.writer
       .enqueue((tx) =>
         upsertAgentHelloState(tx, {
@@ -163,6 +164,7 @@ async function handleHelloInner(
           },
         ]);
       }),
+    "agent HELLO state write failed",
   );
 
   const transportIp = ws.data.transportIp ?? null;
@@ -172,14 +174,17 @@ async function handleHelloInner(
     transportIp,
   });
   if (geoIp) {
-    resolveAndPublishAgentGeo({
-      db: deps.db,
-      registry: deps.registry,
-      liveHub: deps.liveHub,
-      geoLookup: deps.geoLookup,
-      agentId,
-      ip: geoIp,
-    });
+    deps.trackTask(
+      resolveAndPublishAgentGeo({
+        db: deps.db,
+        registry: deps.registry,
+        liveHub: deps.liveHub,
+        geoLookup: deps.geoLookup,
+        agentId,
+        ip: geoIp,
+      }),
+      "agent geo resolution failed",
+    );
   }
 
   ws.send(
@@ -190,5 +195,5 @@ async function handleHelloInner(
     }),
   );
 
-  void deps.pushProbeConfig(agentId);
+  deps.trackTask(deps.pushProbeConfig(agentId), "initial probe config push failed");
 }

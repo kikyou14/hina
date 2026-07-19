@@ -46,11 +46,5 @@ export async function createDbClient(options: DbOptions): Promise<DbClient> {
 }
 
 export function closeDbClient(db: DbClient): void {
-  const sqlite = db.$client;
-  try {
-    sqlite.run("PRAGMA optimize");
-  } catch (err) {
-    console.error("PRAGMA optimize on shutdown failed:", err);
-  }
-  sqlite.close();
+  db.$client.close();
 }

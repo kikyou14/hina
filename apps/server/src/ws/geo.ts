@@ -13,8 +13,8 @@ export function resolveAndPublishAgentGeo(args: {
   geoLookup: GeoLookup;
   agentId: string;
   ip: string;
-}): void {
-  void args.geoLookup
+}): Promise<void> {
+  return args.geoLookup
     .resolveAgentGeo(args.db, args.agentId, args.ip)
     .then((geo) => {
       if (!geo) return;

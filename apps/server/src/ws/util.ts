@@ -17,16 +17,6 @@ export function sendAndClose<T>(
   }
 }
 
-/**
- * Fire-and-forget a db write promise, logging any failure without propagating
- * it to the caller.
- */
-export function enqueueOrLog(promise: Promise<unknown>, label = "db write failed"): void {
-  promise.catch((err) => {
-    console.error(label, err);
-  });
-}
-
 export function normalizeOptionalString(value: string | undefined): string | null {
   const trimmed = value?.trim();
   return trimmed ? trimmed : null;

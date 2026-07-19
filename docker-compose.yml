@@ -6,4 +6,5 @@ services:
       - "3000:3000"
     volumes:
       - ./data:/app/data
+    stop_grace_period: 15s
     restart: unless-stopped

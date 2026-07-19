@@ -11,7 +11,7 @@ import { getMigrationsFolder } from "../paths";
 import { encodeEnvelope, MessageType } from "../protocol/envelope";
 import { RUNTIME_AGENT_DEFAULTS, RuntimeAgentConfigStore } from "../settings/runtime";
 import { sha256Hex } from "../util/hash";
-import { createWsHub, type AgentWsData } from "./hub";
+import { createWsHub, type AgentWsData, type WsHub } from "./hub";
 
 function createTestDb(): { db: DbClient; sqlite: Database } {
   const sqlite = new Database(":memory:");
@@ -67,52 +67,116 @@ function makeAuthedWs(agentId: string, transportIp: string): ServerWebSocket<Age
   } as unknown as ServerWebSocket<AgentWsData>;
 }
 
+async function makeHub(geoLookup: GeoLookup): Promise<{
+  hub: WsHub;
+  sqlite: Database;
+}> {
+  const { db, sqlite } = createTestDb();
+  await seedAgent(db, "a1");
+
+  const registry = new AgentRegistry(db);
+  await registry.load();
+  const runtimeAgentConfig = new RuntimeAgentConfigStore({
+    current: RUNTIME_AGENT_DEFAULTS,
+    source: {
+      telemetryIntervalMs: "default",
+      telemetryJitterMs: "default",
+    },
+  });
+
+  return {
+    hub: createWsHub({
+      db,
+      registry,
+      runtimeAgentConfig,
+      geoLookup,
+      asnLookup: null,
+    }),
+    sqlite,
+  };
+}
+
 describe("agent geo updates", () => {
   test("IP_UPDATE geo lookup prefers reported public IP over CDN transport IP", async () => {
-    const { db, sqlite } = createTestDb();
-    let stop: (() => Promise<void>) | null = null;
+    const geoIps: string[] = [];
+    const { hub, sqlite } = await makeHub({
+      lookupGeo: async () => null,
+      resolveAgentGeo: async (_db, _agentId, ip) => {
+        geoIps.push(ip);
+        return null;
+      },
+      clearAgentGeoState: () => {},
+    });
 
     try {
-      await seedAgent(db, "a1");
-      const registry = new AgentRegistry(db);
-      await registry.load();
-
-      const geoIps: string[] = [];
-      const geoLookup: GeoLookup = {
-        lookupGeo: async () => null,
-        resolveAgentGeo: async (_db, _agentId, ip) => {
-          geoIps.push(ip);
-          return null;
-        },
-        clearAgentGeoState: () => {},
-      };
-      const runtimeAgentConfig = new RuntimeAgentConfigStore({
-        current: RUNTIME_AGENT_DEFAULTS,
-        source: {
-          telemetryIntervalMs: "default",
-          telemetryJitterMs: "default",
-        },
-      });
-      const hub = createWsHub({
-        db,
-        registry,
-        runtimeAgentConfig,
-        geoLookup,
-        asnLookup: null,
-      });
-      stop = hub.stop;
-
       const ws = makeAuthedWs("a1", "104.16.0.1");
       const message = encodeEnvelope(MessageType.IpUpdate, {
         ip4: "8.8.8.8",
         ip6: "2001:4860:4860::8888",
       });
 
-      await Promise.resolve(hub.websocket.message(ws, message));
+      await hub.websocket.message(ws, message);
 
       expect(geoIps).toEqual(["8.8.8.8"]);
     } finally {
-      await stop?.();
+      await hub.stop();
+      sqlite.close();
+    }
+  });
+
+  test("ignores messages after quiescing", async () => {
+    const geoIps: string[] = [];
+    const { hub, sqlite } = await makeHub({
+      lookupGeo: async () => null,
+      resolveAgentGeo: async (_db, _agentId, ip) => {
+        geoIps.push(ip);
+        return null;
+      },
+      clearAgentGeoState: () => {},
+    });
+
+    try {
+      hub.quiesce();
+      const ws = makeAuthedWs("a1", "104.16.0.1");
+      const message = encodeEnvelope(MessageType.IpUpdate, { ip4: "8.8.8.8" });
+
+      await hub.websocket.message(ws, message);
+
+      expect(geoIps).toEqual([]);
+    } finally {
+      await hub.stop();
+      sqlite.close();
+    }
+  });
+
+  test("waits for tracked background work before stopping", async () => {
+    let finishGeo!: () => void;
+    const geoFinished = new Promise<null>((resolve) => {
+      finishGeo = () => resolve(null);
+    });
+    const { hub, sqlite } = await makeHub({
+      lookupGeo: async () => null,
+      resolveAgentGeo: () => geoFinished,
+      clearAgentGeoState: () => {},
+    });
+
+    try {
+      const ws = makeAuthedWs("a1", "104.16.0.1");
+      const message = encodeEnvelope(MessageType.IpUpdate, { ip4: "8.8.8.8" });
+      await hub.websocket.message(ws, message);
+
+      let stopped = false;
+      const stop = hub.stop().then(() => {
+        stopped = true;
+      });
+      await Promise.resolve();
+      expect(stopped).toBe(false);
+
+      finishGeo();
+      await stop;
+      expect(stopped).toBe(true);
+    } finally {
+      await hub.stop();
       sqlite.close();
     }
   });

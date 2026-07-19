@@ -76,6 +76,11 @@ describe("handleHello defers registry update until DB commit succeeds", () => {
   let writer: DbWriter;
   let geoLookup: GeoLookup;
   let deps: HelloHandlerDeps;
+  let backgroundTasks: Set<Promise<void>>;
+
+  async function waitForBackgroundTasks() {
+    while (backgroundTasks.size > 0) await Promise.all(backgroundTasks);
+  }
 
   beforeEach(async () => {
     const r = createTestDb();
@@ -84,6 +89,7 @@ describe("handleHello defers registry update until DB commit succeeds", () => {
     registry = new AgentRegistry(db);
     writer = new DbWriter(db);
     geoLookup = createGeoLookup();
+    backgroundTasks = new Set();
     deps = {
       db,
       writer,
@@ -92,10 +98,22 @@ describe("handleHello defers registry update until DB commit succeeds", () => {
       connections: new Map(),
       buildRuntimeConfigBody: () => ({ t_ms: 1000, j_ms: 100 }),
       pushProbeConfig: async () => true,
+      trackTask(task) {
+        const tracked = task.then(
+          () => {},
+          () => {},
+        );
+        backgroundTasks.add(tracked);
+        void tracked.then(
+          () => backgroundTasks.delete(tracked),
+          () => backgroundTasks.delete(tracked),
+        );
+      },
     };
   });
 
   afterEach(async () => {
+    await waitForBackgroundTasks();
     await writer.drain();
     sqlite.close();
   });
@@ -156,8 +174,7 @@ describe("handleHello defers registry update until DB commit succeeds", () => {
     };
 
     await handleHello(ws, helloBody, Date.now(), deps2);
-    // Let the rejected promise's `.catch` (inside enqueueOrLog) flush.
-    await new Promise((r) => setTimeout(r, 5));
+    await waitForBackgroundTasks();
 
     // DB: still at seed state — nothing was written.
     const [row] = await db
@@ -196,6 +213,7 @@ describe("handleHello defers registry update until DB commit succeeds", () => {
     };
 
     await handleHello(ws, helloBody, Date.now(), { ...deps, geoLookup: geoLookupStub });
+    await waitForBackgroundTasks();
 
     expect(geoIps).toEqual(["8.8.8.8"]);
   });

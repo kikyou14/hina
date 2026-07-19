@@ -19,6 +19,7 @@ import {
   parseTelemetryBody,
 } from "../protocol/envelope";
 import type { RuntimeAgentConfigStore } from "../settings/runtime";
+import { ActivityGate } from "../util/activity-gate";
 import { resolveAgentIpFamilies, selectAgentGeoIp } from "../util/ip";
 import { resolveClientIp } from "../util/trust-proxy";
 import { FlushBuffer } from "./flush-buffer";
@@ -31,7 +32,7 @@ import {
   fetchAllAgentTasks,
   type AgentProbeScope,
 } from "./probe-config";
-import { enqueueOrLog, sendAndClose } from "./util";
+import { sendAndClose } from "./util";
 
 const wsLog = createLogger("ws");
 
@@ -79,10 +80,14 @@ export type WsHub = {
   handleUpgrade: (req: Request, server: Server<AgentWsData>) => Response | undefined;
   websocket: {
     open: (ws: ServerWebSocket<AgentWsData>) => void;
-    message: (ws: ServerWebSocket<AgentWsData>, message: string | Uint8Array) => void;
+    message: (
+      ws: ServerWebSocket<AgentWsData>,
+      message: string | Uint8Array,
+    ) => void | Promise<void>;
     close: (ws: ServerWebSocket<AgentWsData>) => void;
   };
   probeDispatcher: ProbeDispatcher;
+  quiesce: () => void;
   // Stop the flush timer and drain buffered writes. Idempotent.
   stop: () => Promise<void>;
 };
@@ -127,7 +132,35 @@ export function createWsHub(deps: {
 }): WsHub {
   const writer = new DbWriter(deps.db);
   const connections = new Map<string, ServerWebSocket<AgentWsData>>();
+  const activityGate = new ActivityGate();
+  const backgroundTasks = new Set<Promise<void>>();
   let lastProbeConfigRev = 0;
+  let quiescing = false;
+  let stopPromise: Promise<void> | null = null;
+
+  function trackTask(task: Promise<unknown>, label: string): void {
+    const tracked = task.then(
+      () => {},
+      (err) => wsLog.error(label, err),
+    );
+    backgroundTasks.add(tracked);
+    void tracked.then(
+      () => backgroundTasks.delete(tracked),
+      () => backgroundTasks.delete(tracked),
+    );
+  }
+
+  function quiesce(): void {
+    if (quiescing) return;
+    quiescing = true;
+    activityGate.quiesce();
+  }
+
+  async function waitForBackgroundTasks(): Promise<void> {
+    while (backgroundTasks.size > 0) {
+      await Promise.all(backgroundTasks);
+    }
+  }
 
   const flushBuffer = new FlushBuffer(
     {
@@ -137,9 +170,7 @@ export function createWsHub(deps: {
       asnLookup: deps.asnLookup,
       isAgentConnected: (agentId) => connections.has(agentId),
       onRouteChanges: (changes) => {
-        ingestRouteChangeEvents(deps.db, changes).catch((err) => {
-          wsLog.error("route change alert dispatch failed", err);
-        });
+        trackTask(ingestRouteChangeEvents(deps.db, changes), "route change alert dispatch failed");
       },
     },
     {
@@ -178,6 +209,7 @@ export function createWsHub(deps: {
       scope?: AgentProbeScope | null;
     } = {},
   ): Promise<boolean> {
+    if (quiescing) return false;
     const ws = connections.get(agentId);
     if (!ws || !ws.data.authed) return false;
 
@@ -204,6 +236,7 @@ export function createWsHub(deps: {
   }
 
   async function pushRuntimeConfig(agentId: string): Promise<boolean> {
+    if (quiescing) return false;
     const ws = connections.get(agentId);
     if (!ws || !ws.data.authed) return false;
     try {
@@ -312,6 +345,7 @@ export function createWsHub(deps: {
   };
 
   const handleUpgrade: WsHub["handleUpgrade"] = (req, server) => {
+    if (quiescing) return new Response("Service Unavailable", { status: 503 });
     const ip = resolveClientIp(req, server.requestIP(req)?.address);
     const nowMs = Date.now();
     const ok = server.upgrade(req, {
@@ -333,6 +367,10 @@ export function createWsHub(deps: {
 
   const websocket: WsHub["websocket"] = {
     open(ws) {
+      if (quiescing) {
+        ws.close(1012, "server_restart");
+        return;
+      }
       ws.data.authed = false;
       ws.data.rateLimit.tokens = AGENT_MSG_BURST;
       ws.data.rateLimit.lastMs = Date.now();
@@ -344,6 +382,9 @@ export function createWsHub(deps: {
     },
 
     async message(ws, message) {
+      const release = activityGate.tryEnter();
+      if (!release) return;
+
       try {
         if (typeof message === "string") {
           sendAndClose(
@@ -380,6 +421,7 @@ export function createWsHub(deps: {
             connections,
             buildRuntimeConfigBody,
             pushProbeConfig,
+            trackTask,
           });
           return;
         }
@@ -423,7 +465,7 @@ export function createWsHub(deps: {
           ws.data.ipV4 = resolvedIps.ipv4;
           ws.data.ipV6 = resolvedIps.ipv6;
 
-          enqueueOrLog(
+          trackTask(
             writer
               .enqueue((tx) =>
                 updateAgentIps(tx, agentId, resolvedIps.ipv4, resolvedIps.ipv6, nowMs),
@@ -444,6 +486,7 @@ export function createWsHub(deps: {
                   },
                 ]);
               }),
+            "agent IP update write failed",
           );
 
           const geoIp = selectAgentGeoIp({
@@ -452,14 +495,17 @@ export function createWsHub(deps: {
             transportIp: ws.data.transportIp ?? null,
           });
           if (geoIp) {
-            resolveAndPublishAgentGeo({
-              db: deps.db,
-              registry: deps.registry,
-              liveHub: deps.liveHub,
-              geoLookup: deps.geoLookup,
-              agentId,
-              ip: geoIp,
-            });
+            trackTask(
+              resolveAndPublishAgentGeo({
+                db: deps.db,
+                registry: deps.registry,
+                liveHub: deps.liveHub,
+                geoLookup: deps.geoLookup,
+                agentId,
+                ip: geoIp,
+              }),
+              "agent geo resolution failed",
+            );
           }
           return;
         }
@@ -483,47 +529,65 @@ export function createWsHub(deps: {
         try {
           ws.close(1011, "internal_error");
         } catch {}
+      } finally {
+        release();
       }
     },
 
     close(ws) {
       if (ws.data.helloTimer) clearTimeout(ws.data.helloTimer);
-      if (!ws.data.agentId) return;
-      const nowMs = Date.now();
-      const agentId = ws.data.agentId;
-      const current = connections.get(agentId);
-      if (current !== ws) return;
+      const release = activityGate.tryEnter();
+      if (!release) return;
 
-      deps.geoLookup.clearAgentGeoState(agentId);
-      connections.delete(agentId);
-      wsLog.info(`agent disconnected: id=${agentId}`);
+      try {
+        if (!ws.data.agentId) return;
+        const nowMs = Date.now();
+        const agentId = ws.data.agentId;
+        const current = connections.get(agentId);
+        if (current !== ws) return;
 
-      const lastIpV4 = ws.data.ipV4 ?? null;
-      const lastIpV6 = ws.data.ipV6 ?? null;
+        deps.geoLookup.clearAgentGeoState(agentId);
+        connections.delete(agentId);
+        wsLog.info(`agent disconnected: id=${agentId}`);
 
-      enqueueOrLog(
-        writer
-          .enqueue((tx) => markAgentOffline(tx, agentId, nowMs))
-          .then(() => {
-            deps.registry.markOffline(agentId, nowMs);
-            deps.liveHub?.publishAgentPresence([
-              {
-                agentId,
-                online: false,
-                lastSeenAtMs: nowMs,
-                lastIpV4,
-                lastIpV6,
-              },
-            ]);
-          }),
-      );
+        const lastIpV4 = ws.data.ipV4 ?? null;
+        const lastIpV6 = ws.data.ipV6 ?? null;
+
+        trackTask(
+          writer
+            .enqueue((tx) => markAgentOffline(tx, agentId, nowMs))
+            .then(() => {
+              deps.registry.markOffline(agentId, nowMs);
+              deps.liveHub?.publishAgentPresence([
+                {
+                  agentId,
+                  online: false,
+                  lastSeenAtMs: nowMs,
+                  lastIpV4,
+                  lastIpV6,
+                },
+              ]);
+            }),
+          "agent offline write failed",
+        );
+      } finally {
+        release();
+      }
     },
   };
 
-  async function stop(): Promise<void> {
+  async function stopInner(): Promise<void> {
+    await activityGate.waitForIdle();
     await flushBuffer.stop();
+    await waitForBackgroundTasks();
     await writer.drain();
   }
 
-  return { handleUpgrade, websocket, probeDispatcher, stop };
+  function stop(): Promise<void> {
+    quiesce();
+    stopPromise ??= stopInner();
+    return stopPromise;
+  }
+
+  return { handleUpgrade, websocket, probeDispatcher, quiesce, stop };
 }
