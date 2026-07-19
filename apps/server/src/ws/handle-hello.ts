@@ -15,6 +15,7 @@ import { resolveAgentIpFamilies, selectAgentGeoIp } from "../util/ip";
 import { safeJsonStringify } from "../util/lang";
 import { resolveAndPublishAgentGeo } from "./geo";
 import type { AgentWsData } from "./hub";
+import { capabilitySupportsTracerouteTcpSizePair } from "./probe-config";
 import { enqueueOrLog, normalizeOptionalString, sendAndClose } from "./util";
 
 const wsLog = createLogger("ws");
@@ -106,6 +107,7 @@ async function handleHelloInner(
 
   const inventoryPack = hello.inv !== undefined ? Buffer.from(encode(hello.inv)) : undefined;
   const capabilitiesJson = safeJsonStringify(hello.cap) ?? null;
+  ws.data.supportsTracerouteTcpSizePair = capabilitySupportsTracerouteTcpSizePair(hello.cap);
   const resolvedIps = resolveAgentIpFamilies({
     reportedIpv4: hello.ip4 ?? null,
     reportedIpv6: hello.ip6 ?? null,

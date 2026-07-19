@@ -10,12 +10,21 @@ use url::Url;
 use crate::protocol::{ProbeTaskKind, ProbeTaskWire};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum TracerouteMode {
+    Icmp,
+    TcpSizePair { port: u16, packet_sizes: [u16; 2] },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum ProbeTarget {
     Icmp { host: String },
     Tcp { host: String, port: u16 },
     Http { url: Url },
-    Traceroute { host: String },
+    Traceroute { host: String, mode: TracerouteMode },
 }
+
+pub(crate) const TRACEROUTE_TCP_MIN_PACKET_SIZE: u16 = 40;
+pub(crate) const TRACEROUTE_TCP_MAX_PACKET_SIZE: u16 = 1500;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ProbeTaskSpec {
@@ -88,6 +97,7 @@ pub(crate) fn parse_task(task: &ProbeTaskWire) -> anyhow::Result<ProbeTaskSpec> 
         },
         ProbeTaskKind::Traceroute => ProbeTarget::Traceroute {
             host: extract_host(&task.target)?,
+            mode: parse_traceroute_mode(&task.target)?,
         },
         ProbeTaskKind::Tcp => {
             let host = extract_host(&task.target)?;
@@ -124,6 +134,55 @@ pub(crate) fn parse_task(task: &ProbeTaskWire) -> anyhow::Result<ProbeTaskSpec> 
         timeout,
         target,
     })
+}
+
+fn parse_traceroute_mode(target: &Value) -> anyhow::Result<TracerouteMode> {
+    let protocol = target
+        .get("protocol")
+        .and_then(Value::as_str)
+        .map(str::trim);
+
+    match protocol {
+        None | Some("") | Some("icmp") => Ok(TracerouteMode::Icmp),
+        Some("tcp") => {
+            let port_u64 = target
+                .get("port")
+                .and_then(Value::as_u64)
+                .context("missing target.port")?;
+            let port = u16::try_from(port_u64)
+                .ok()
+                .filter(|port| *port != 0)
+                .context("invalid target.port")?;
+
+            let sizes = target
+                .get("packetSizes")
+                .and_then(Value::as_array)
+                .context("missing target.packetSizes")?;
+            if sizes.len() != 2 {
+                anyhow::bail!("target.packetSizes must contain exactly two sizes");
+            }
+
+            let mut packet_sizes = [0u16; 2];
+            for (index, value) in sizes.iter().enumerate() {
+                let raw = value.as_u64().context("invalid packet size")?;
+                let size = u16::try_from(raw).context("invalid packet size")?;
+                if !(TRACEROUTE_TCP_MIN_PACKET_SIZE..=TRACEROUTE_TCP_MAX_PACKET_SIZE)
+                    .contains(&size)
+                {
+                    anyhow::bail!("packet size out of range");
+                }
+                packet_sizes[index] = size;
+            }
+
+            if packet_sizes[0] == packet_sizes[1] {
+                anyhow::bail!("packet sizes must differ");
+            }
+            packet_sizes.sort_unstable();
+
+            Ok(TracerouteMode::TcpSizePair { port, packet_sizes })
+        }
+        Some(other) => anyhow::bail!("unsupported traceroute protocol: {other}"),
+    }
 }
 
 fn extract_host(target: &Value) -> anyhow::Result<String> {

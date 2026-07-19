@@ -18,14 +18,43 @@ import { Switch } from "@/components/ui/switch";
 import { getUserErrorMessage } from "@/lib/userErrors";
 import {
   isIpv6Literal,
+  isTcpTracerouteTarget,
   isValidHost,
   isValidHttpUrl,
+  isValidPort,
+  isValidTracerouteTcpPacketSize,
+  parseIntegerInput,
+  parseTracerouteTcpPacketSizes,
+  TRACEROUTE_TCP_PACKET_SIZE_MAX,
+  TRACEROUTE_TCP_PACKET_SIZE_MIN,
+  tracerouteProtocolOfTarget,
   type ProbeTaskFormValue,
+  type TracerouteProtocol,
 } from "../lib/probeValidation";
 import { SectionLabel } from "./SectionLabel";
 
-type ProbeFormField = "intervalSec" | "timeoutMs" | "url" | "host" | "port";
+type ProbeFormField =
+  | "intervalSec"
+  | "timeoutMs"
+  | "url"
+  | "host"
+  | "port"
+  | "smallSize"
+  | "largeSize";
 type ProbeFormError = { text: string; field: ProbeFormField | null };
+
+const TARGET_FORM_FIELDS: readonly ProbeFormField[] = [
+  "url",
+  "host",
+  "port",
+  "smallSize",
+  "largeSize",
+];
+const TCP_TRACEROUTE_ONLY_FIELDS: readonly ProbeFormField[] = ["port", "smallSize", "largeSize"];
+
+const DEFAULT_TCP_TRACEROUTE_PORT = "443";
+const DEFAULT_SMALL_PACKET_SIZE = "64";
+const DEFAULT_LARGE_PACKET_SIZE = "1400";
 
 function initScopeFromTask(task: AdminProbeTask | null): ScopeState {
   if (!task) return { mode: "specific", groupIds: [], agentIds: [] };
@@ -60,29 +89,59 @@ export function ProbeTaskForm(props: {
   const [intervalSec, setIntervalSec] = React.useState(String(tsk?.intervalSec ?? 60));
   const [timeoutMs, setTimeoutMs] = React.useState(String(tsk?.timeoutMs ?? 5000));
 
-  const initialHost = tsk?.target && "host" in tsk.target ? String(tsk.target.host) : "";
-  const initialPort = tsk?.target && "port" in tsk.target ? String(tsk.target.port) : "";
-  const initialUrl = tsk?.target && "url" in tsk.target ? String(tsk.target.url) : "";
+  const initialTarget = tsk?.target ?? null;
+  const initialHost = initialTarget && "host" in initialTarget ? String(initialTarget.host) : "";
+  const initialPort = initialTarget && "port" in initialTarget ? String(initialTarget.port) : "";
+  const initialUrl = initialTarget && "url" in initialTarget ? String(initialTarget.url) : "";
+  const initialTcpTraceroute = isTcpTracerouteTarget(initialTarget) ? initialTarget : null;
 
   const [host, setHost] = React.useState(initialHost);
   const [port, setPort] = React.useState(initialPort);
   const [url, setUrl] = React.useState(initialUrl);
+  const [tracerouteProtocol, setTracerouteProtocol] = React.useState<TracerouteProtocol>(() =>
+    tracerouteProtocolOfTarget(initialTarget),
+  );
+  const [tracerouteTcpPort, setTracerouteTcpPort] = React.useState(
+    initialTcpTraceroute ? String(initialTcpTraceroute.port) : DEFAULT_TCP_TRACEROUTE_PORT,
+  );
+  const [smallSize, setSmallSize] = React.useState(
+    initialTcpTraceroute ? String(initialTcpTraceroute.packetSizes[0]) : DEFAULT_SMALL_PACKET_SIZE,
+  );
+  const [largeSize, setLargeSize] = React.useState(
+    initialTcpTraceroute ? String(initialTcpTraceroute.packetSizes[1]) : DEFAULT_LARGE_PACKET_SIZE,
+  );
 
   const [scope, setScope] = React.useState<ScopeState>(() => initScopeFromTask(tsk));
 
   const [error, setError] = React.useState<ProbeFormError | null>(null);
+
+  function clearErrorForFields(fields: readonly ProbeFormField[]) {
+    if (error && error.field !== null && fields.includes(error.field)) {
+      setError(null);
+    }
+  }
 
   const target: ProbeTaskTarget | null = React.useMemo(() => {
     if (kind === "http") {
       return url.trim() ? { url: url.trim() } : null;
     }
     if (kind === "tcp") {
-      const p = Number.parseInt(port, 10);
-      if (!host.trim() || !Number.isFinite(p)) return null;
+      const p = parseIntegerInput(port);
+      if (!host.trim() || p === null) return null;
       return { host: host.trim(), port: p };
     }
+    if (kind === "traceroute" && tracerouteProtocol === "tcp") {
+      if (!host.trim()) return null;
+      const p = parseIntegerInput(tracerouteTcpPort);
+      const small = parseIntegerInput(smallSize);
+      const large = parseIntegerInput(largeSize);
+      if (p === null || small === null || large === null) return null;
+      const packetSizes = parseTracerouteTcpPacketSizes(small, large);
+      if (!packetSizes) return null;
+      return { host: host.trim(), protocol: "tcp", port: p, packetSizes };
+    }
     return host.trim() ? { host: host.trim() } : null;
-  }, [kind, host, port, url]);
+  }, [kind, host, port, url, tracerouteProtocol, tracerouteTcpPort, smallSize, largeSize]);
 
   const scopeValid =
     scope.mode === "all" ||
@@ -97,13 +156,13 @@ export function ProbeTaskForm(props: {
         e.preventDefault();
         setError(null);
         try {
-          const interval = Number.parseInt(intervalSec, 10);
-          const timeout = Number.parseInt(timeoutMs, 10);
-          if (!Number.isFinite(interval) || interval < 1 || interval > 86400) {
+          const interval = parseIntegerInput(intervalSec);
+          const timeout = parseIntegerInput(timeoutMs);
+          if (interval === null || interval < 1 || interval > 86400) {
             setError({ text: t("probes.form.invalidInterval"), field: "intervalSec" });
             return;
           }
-          if (!Number.isFinite(timeout) || timeout < 100 || timeout > 120_000) {
+          if (timeout === null || timeout < 100 || timeout > 120_000) {
             setError({ text: t("probes.form.invalidTimeout"), field: "timeoutMs" });
             return;
           }
@@ -131,8 +190,8 @@ export function ProbeTaskForm(props: {
               setError({ text: t("probes.form.invalidHost"), field: "host" });
               return;
             }
-            const p = Number.parseInt(port, 10);
-            if (!Number.isInteger(p) || p < 1 || p > 65535) {
+            const p = parseIntegerInput(port);
+            if (p === null || p < 1 || p > 65535) {
               setError({ text: t("probes.form.invalidPort"), field: "port" });
               return;
             }
@@ -155,7 +214,31 @@ export function ProbeTaskForm(props: {
               });
               return;
             }
-            validTarget = { host: trimmedHost };
+            if (kind === "traceroute" && tracerouteProtocol === "tcp") {
+              const p = parseIntegerInput(tracerouteTcpPort);
+              if (p === null || !isValidPort(p)) {
+                setError({ text: t("probes.form.invalidPort"), field: "port" });
+                return;
+              }
+              const small = parseIntegerInput(smallSize);
+              if (small === null || !isValidTracerouteTcpPacketSize(small)) {
+                setError({ text: t("probes.form.invalidPacketSize"), field: "smallSize" });
+                return;
+              }
+              const large = parseIntegerInput(largeSize);
+              if (large === null || !isValidTracerouteTcpPacketSize(large)) {
+                setError({ text: t("probes.form.invalidPacketSize"), field: "largeSize" });
+                return;
+              }
+              const packetSizes = parseTracerouteTcpPacketSizes(small, large);
+              if (!packetSizes) {
+                setError({ text: t("probes.form.duplicatePacketSizes"), field: "largeSize" });
+                return;
+              }
+              validTarget = { host: trimmedHost, protocol: "tcp", port: p, packetSizes };
+            } else {
+              validTarget = { host: trimmedHost };
+            }
           }
 
           const payload: ProbeTaskFormValue = {
@@ -203,9 +286,7 @@ export function ProbeTaskForm(props: {
               setKind(nextKind);
               // Target input set changes with kind; clear only target-related errors.
               // interval/timeout errors are kind-independent and must be preserved.
-              if (error?.field === "url" || error?.field === "host" || error?.field === "port") {
-                setError(null);
-              }
+              clearErrorForFields(TARGET_FORM_FIELDS);
               if (nextKind !== "traceroute") setTraceRevealHopDetails(false);
             }}
           >
@@ -330,6 +411,98 @@ export function ProbeTaskForm(props: {
                 aria-invalid={error?.field === "port"}
               />
             </div>
+          </div>
+        ) : kind === "traceroute" ? (
+          <div className="grid gap-3">
+            <div className="grid min-w-0 gap-1.5">
+              <SectionLabel>{t("probes.form.tracerouteProtocol")}</SectionLabel>
+              <Select
+                value={tracerouteProtocol}
+                onValueChange={(v) => {
+                  const nextProtocol = v as TracerouteProtocol;
+                  setTracerouteProtocol(nextProtocol);
+                  if (nextProtocol === "icmp") clearErrorForFields(TCP_TRACEROUTE_ONLY_FIELDS);
+                }}
+              >
+                <SelectTrigger className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="icmp">{t("probes.form.tracerouteProtocolIcmp")}</SelectItem>
+                  <SelectItem value="tcp">{t("probes.form.tracerouteProtocolTcp")}</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="grid gap-1.5">
+              <SectionLabel>{t("probes.form.host")}</SectionLabel>
+              <Input
+                value={host}
+                onChange={(e) => {
+                  setHost(e.target.value);
+                  if (error?.field === "host") setError(null);
+                }}
+                disabled={props.pending}
+                placeholder="1.1.1.1"
+                aria-invalid={error?.field === "host"}
+              />
+            </div>
+            {tracerouteProtocol === "tcp" ? (
+              <>
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                  <div className="grid gap-1.5">
+                    <SectionLabel>{t("probes.form.port")}</SectionLabel>
+                    <Input
+                      type="number"
+                      min={1}
+                      max={65535}
+                      value={tracerouteTcpPort}
+                      onChange={(e) => {
+                        setTracerouteTcpPort(e.target.value);
+                        if (error?.field === "port") setError(null);
+                      }}
+                      disabled={props.pending}
+                      placeholder={DEFAULT_TCP_TRACEROUTE_PORT}
+                      aria-invalid={error?.field === "port"}
+                    />
+                  </div>
+                  <div className="grid gap-1.5">
+                    <SectionLabel>{t("probes.form.tracerouteSmallSize")}</SectionLabel>
+                    <Input
+                      type="number"
+                      min={TRACEROUTE_TCP_PACKET_SIZE_MIN}
+                      max={TRACEROUTE_TCP_PACKET_SIZE_MAX}
+                      value={smallSize}
+                      onChange={(e) => {
+                        setSmallSize(e.target.value);
+                        if (error?.field === "smallSize") setError(null);
+                      }}
+                      disabled={props.pending}
+                      placeholder={DEFAULT_SMALL_PACKET_SIZE}
+                      aria-invalid={error?.field === "smallSize"}
+                    />
+                  </div>
+                  <div className="grid gap-1.5">
+                    <SectionLabel>{t("probes.form.tracerouteLargeSize")}</SectionLabel>
+                    <Input
+                      type="number"
+                      min={TRACEROUTE_TCP_PACKET_SIZE_MIN}
+                      max={TRACEROUTE_TCP_PACKET_SIZE_MAX}
+                      value={largeSize}
+                      onChange={(e) => {
+                        setLargeSize(e.target.value);
+                        if (error?.field === "largeSize") setError(null);
+                      }}
+                      disabled={props.pending}
+                      placeholder={DEFAULT_LARGE_PACKET_SIZE}
+                      aria-invalid={error?.field === "largeSize"}
+                    />
+                  </div>
+                </div>
+                <p className="text-muted-foreground text-xs">
+                  {t("probes.form.tracerouteSizeHint")}
+                </p>
+              </>
+            ) : null}
           </div>
         ) : (
           <div className="grid gap-1.5">

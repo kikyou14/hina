@@ -2,6 +2,7 @@ import { and, eq, inArray, or, sql } from "drizzle-orm";
 import type { DbTx } from "../db/client";
 import { probeResultLatest, probeTask, routeChangeState } from "../db/schema";
 import type { AsnLookup } from "../geo/asn";
+import { isRecord } from "../util/lang";
 import type { ProbeResultIngestArgs } from "./probe";
 import {
   advanceRouteChangeState,
@@ -13,25 +14,15 @@ import {
   extractRouteObservation,
   type HopLike,
   type ResponseLike,
+  type TraceLike,
   type TracerouteLike,
 } from "./traceroute-route";
-import { clampText, safeJsonStringify } from "./util";
+import { clampText, safeJsonStringify, TRACEROUTE_EXTRA_JSON_MAX_BYTES } from "./util";
 
-function enrichTracerouteAsn(extraJson: string, asnLookup: AsnLookup): string {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(extraJson);
-  } catch {
-    return extraJson;
-  }
-
-  if (typeof parsed !== "object" || parsed === null) return extraJson;
-  const obj = parsed as TracerouteLike;
-  if (obj.kind !== "traceroute" || !Array.isArray(obj.hops)) return extraJson;
-
+function enrichHopsAsn(hops: unknown[], asnLookup: AsnLookup): boolean {
   let modified = false;
 
-  for (const hop of obj.hops as HopLike[]) {
+  for (const hop of hops as HopLike[]) {
     if (typeof hop !== "object" || hop === null) continue;
     if (!Array.isArray(hop.responses)) continue;
 
@@ -53,24 +44,82 @@ function enrichTracerouteAsn(extraJson: string, asnLookup: AsnLookup): string {
     }
   }
 
+  return modified;
+}
+
+function enrichDestinationAsn(obj: TracerouteLike, asnLookup: AsnLookup): boolean {
   if (
-    (obj.destination_asn_info === null || obj.destination_asn_info === undefined) &&
-    typeof obj.target_ip === "string"
+    (obj.destination_asn_info !== null && obj.destination_asn_info !== undefined) ||
+    typeof obj.target_ip !== "string"
   ) {
-    const info = asnLookup.lookup(obj.target_ip);
-    if (info) {
-      obj.destination_asn_info = {
-        asn: info.asn,
-        prefix: "",
-        country_code: "",
-        registry: "",
-        name: info.name,
-      };
-      modified = true;
-    }
+    return false;
   }
 
+  const info = asnLookup.lookup(obj.target_ip);
+  if (!info) return false;
+
+  obj.destination_asn_info = {
+    asn: info.asn,
+    prefix: "",
+    country_code: "",
+    registry: "",
+    name: info.name,
+  };
+  return true;
+}
+
+export function enrichTracerouteAsn(extraJson: string, asnLookup: AsnLookup): string {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(extraJson);
+  } catch {
+    return extraJson;
+  }
+
+  if (!isRecord(parsed)) return extraJson;
+  const obj = parsed as TracerouteLike;
+  if (obj.kind !== "traceroute") return extraJson;
+
+  let modified = false;
+
+  if (obj.v === 2 && Array.isArray(obj.traces)) {
+    for (const trace of obj.traces) {
+      if (!isRecord(trace)) continue;
+      const t = trace as TraceLike;
+      if (!Array.isArray(t.hops)) continue;
+      if (enrichHopsAsn(t.hops, asnLookup)) modified = true;
+    }
+  } else if (Array.isArray(obj.hops)) {
+    if (enrichHopsAsn(obj.hops, asnLookup)) modified = true;
+  }
+
+  if (enrichDestinationAsn(obj, asnLookup)) modified = true;
+
   return modified ? JSON.stringify(parsed) : extraJson;
+}
+
+function detectTracerouteResultVersion(x: unknown): number {
+  if (isRecord(x) && typeof x["v"] === "number" && Number.isFinite(x["v"])) return x["v"];
+  return 2;
+}
+
+export function buildTracerouteResultExtraJson(
+  x: unknown,
+  asnLookup: AsnLookup | null,
+): string | null {
+  if (x === undefined) return null;
+
+  const json = safeJsonStringify(x);
+  if (json === null) return null;
+
+  const enriched = asnLookup ? enrichTracerouteAsn(json, asnLookup) : json;
+  if (Buffer.byteLength(enriched, "utf8") <= TRACEROUTE_EXTRA_JSON_MAX_BYTES) return enriched;
+
+  return JSON.stringify({
+    kind: "traceroute",
+    v: detectTracerouteResultVersion(x),
+    error_code: "result_too_large",
+  });
 }
 
 export type RouteChangeEvent = {
@@ -113,11 +162,7 @@ export async function ingestTracerouteResultsBatch(
     const r = args.result;
     const nowMs = args.recvTsMs;
     const err = clampText(r.err, 4096);
-    let extraJson =
-      r.x === undefined ? null : clampText(safeJsonStringify(r.x) ?? undefined, 32_768);
-    if (asnLookup && extraJson) {
-      extraJson = enrichTracerouteAsn(extraJson, asnLookup);
-    }
+    const extraJson = buildTracerouteResultExtraJson(r.x, asnLookup);
 
     const observation = extractRouteObservation(extraJson);
     const signature = observation?.signature ?? null;

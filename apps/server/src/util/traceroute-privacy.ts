@@ -80,6 +80,68 @@ function filterPrivateHops(hops: unknown[]): unknown[] {
   });
 }
 
+type PublicTracerouteComparison = {
+  comparable: boolean;
+  route_diverged: boolean;
+  first_diverging_ttl: number | null;
+};
+
+function publicIpsByTtl(trace: unknown): Map<number, string> | null {
+  if (!isRecord(trace) || !Array.isArray(trace.hops)) return null;
+
+  const fragHopTtl =
+    typeof trace.frag_hop_ttl === "number" && Number.isInteger(trace.frag_hop_ttl)
+      ? trace.frag_hop_ttl
+      : null;
+
+  const ips = new Map<number, string>();
+  for (const hop of trace.hops) {
+    if (
+      !isRecord(hop) ||
+      typeof hop.ttl !== "number" ||
+      !Number.isInteger(hop.ttl) ||
+      hop.ttl < 1
+    ) {
+      continue;
+    }
+    if (hop.ttl === fragHopTtl) continue;
+    if (!Array.isArray(hop.responses)) continue;
+
+    const response = hop.responses.find(
+      (candidate) =>
+        isRecord(candidate) && typeof candidate.ip === "string" && !isPrivateIp(candidate.ip),
+    );
+    if (!isRecord(response) || typeof response.ip !== "string") continue;
+
+    const ttl = hop.ttl;
+    if (!ips.has(ttl)) ips.set(ttl, response.ip.trim().toLowerCase());
+  }
+  return ips;
+}
+
+function recomputePublicComparison(traces: unknown[]): PublicTracerouteComparison {
+  const notComparable: PublicTracerouteComparison = {
+    comparable: false,
+    route_diverged: false,
+    first_diverging_ttl: null,
+  };
+  if (traces.length !== 2) return notComparable;
+
+  const first = publicIpsByTtl(traces[0]);
+  const second = publicIpsByTtl(traces[1]);
+  if (first === null || second === null) return notComparable;
+
+  const sharedTtls = [...first.keys()].filter((ttl) => second.has(ttl)).sort((a, b) => a - b);
+  if (sharedTtls.length === 0) return notComparable;
+
+  const firstDivergingTtl = sharedTtls.find((ttl) => first.get(ttl) !== second.get(ttl));
+  return {
+    comparable: true,
+    route_diverged: firstDivergingTtl !== undefined,
+    first_diverging_ttl: firstDivergingTtl ?? null,
+  };
+}
+
 function stripDestinationHopDetails(hops: unknown[], destinationReached: unknown): unknown[] {
   if (destinationReached !== true || hops.length === 0) return hops;
 
@@ -143,6 +205,17 @@ export function anonymizeTracerouteExtraForPublic(
     hops = stripDestinationHopDetails(hops, value.destination_reached);
     value = { ...value, hops };
   }
+
+  if (isRecord(value) && Array.isArray(value.traces)) {
+    const traces = value.traces.map((trace) => {
+      if (!isRecord(trace) || !Array.isArray(trace.hops)) return trace;
+      let hops = filterPrivateHops(trace.hops);
+      hops = stripDestinationHopDetails(hops, trace.destination_reached);
+      return { ...trace, hops };
+    });
+    value = { ...value, traces, comparison: recomputePublicComparison(traces) };
+  }
+
   return anonymizeTracerouteValue(value, options);
 }
 

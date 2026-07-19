@@ -2,7 +2,7 @@ import { sql } from "drizzle-orm";
 import type { DbTx } from "../db/client";
 import { probeResult, probeResultLatest } from "../db/schema";
 import type { ProbeResultBody } from "../protocol/envelope";
-import { clampText, safeJsonStringify } from "./util";
+import { clampText, PROBE_EXTRA_JSON_MAX_LEN, safeJsonStringify } from "./util";
 
 export type ProbeResultIngestArgs = {
   agentId: string;
@@ -27,7 +27,9 @@ export async function ingestProbeResultsBatch(
 
       const err = clampText(r.err, 4096);
       const extraJson =
-        r.x === undefined ? null : clampText(safeJsonStringify(r.x) ?? undefined, 32_768);
+        r.x === undefined
+          ? null
+          : clampText(safeJsonStringify(r.x) ?? undefined, PROBE_EXTRA_JSON_MAX_LEN);
 
       const latMs = r.lat_ms === undefined ? null : r.lat_ms;
       const code = r.code === undefined ? null : r.code;
@@ -126,7 +128,9 @@ export async function ingestProbeResult(tx: DbTx, args: ProbeResultIngestArgs): 
 
   const err = clampText(r.err, 4096);
   const extraJson =
-    r.x === undefined ? null : clampText(safeJsonStringify(r.x) ?? undefined, 32_768);
+    r.x === undefined
+      ? null
+      : clampText(safeJsonStringify(r.x) ?? undefined, PROBE_EXTRA_JSON_MAX_LEN);
 
   const latMs = r.lat_ms === undefined ? null : r.lat_ms;
   const code = r.code === undefined ? null : r.code;

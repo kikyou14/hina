@@ -2,7 +2,16 @@ import { fetchJson } from "./http";
 
 export type ProbeKind = "icmp" | "tcp" | "http" | "traceroute";
 
-export type ProbeTaskTarget = { host: string } | { host: string; port: number } | { url: string };
+export type ProbeTaskTarget =
+  | { host: string }
+  | { host: string; port: number }
+  | { host: string; protocol: "tcp"; port: number; packetSizes: [number, number] }
+  | { url: string };
+
+export type TcpSizePairSupport = {
+  targetAgents: number;
+  unsupportedAgents: number;
+};
 
 export type AdminProbeTask = {
   id: string;
@@ -18,6 +27,7 @@ export type AdminProbeTask = {
   updatedAtMs: number;
   groups: Array<{ id: string; name: string }>;
   agents: Array<{ id: string; name: string }>;
+  tcpSizePairSupport?: TcpSizePairSupport | null;
 };
 
 export type AdminProbeTaskRef = {

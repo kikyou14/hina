@@ -11,6 +11,7 @@ import {
   probeTaskAgent,
   probeTaskGroup,
 } from "../../db/schema";
+import { computeTracerouteTcpSupportCounts } from "../../ws/probe-config";
 import {
   isRecord,
   MAX_NAME_LEN,
@@ -107,6 +108,8 @@ export function registerAdminProbeTaskRoutes(router: Hono<AppContext>) {
       agentsByTaskId.set(l.taskId, list);
     }
 
+    const tcpSupportByTaskId = await computeTracerouteTcpSupportCounts(db, tasks);
+
     return c.json({
       total,
       limit,
@@ -125,6 +128,7 @@ export function registerAdminProbeTaskRoutes(router: Hono<AppContext>) {
         updatedAtMs: t.updatedAtMs,
         groups: groupsByTaskId.get(t.id) ?? [],
         agents: agentsByTaskId.get(t.id) ?? [],
+        tcpSizePairSupport: tcpSupportByTaskId.get(t.id) ?? null,
       })),
     });
   });

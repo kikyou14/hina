@@ -15,19 +15,19 @@ use tokio::{
     task::{JoinSet, spawn_blocking},
 };
 
-use super::{clamp_error, outcome::ProbeOutcome, remaining_until};
+use super::{clamp_error, outcome::ProbeOutcome, remaining_until, task::TracerouteMode};
 
-const TRACEROUTE_START_TTL: u8 = 1;
-const TRACEROUTE_MAX_HOPS: u8 = 30;
-const TRACEROUTE_QUERIES_PER_HOP: u8 = 1;
-const TRACEROUTE_PER_HOP_TIMEOUT: Duration = Duration::from_millis(2000);
+pub(crate) const TRACEROUTE_START_TTL: u8 = 1;
+pub(crate) const TRACEROUTE_MAX_HOPS: u8 = 30;
+pub(crate) const TRACEROUTE_QUERIES_PER_HOP: u8 = 1;
+pub(crate) const TRACEROUTE_PER_HOP_TIMEOUT: Duration = Duration::from_millis(2000);
 
 pub(crate) const TRACEROUTE_MIN_TIMEOUT: Duration = Duration::from_millis(
     TRACEROUTE_MAX_HOPS as u64 * TRACEROUTE_PER_HOP_TIMEOUT.as_millis() as u64 + 5000,
 );
 
 const TRACEROUTE_RDNS_LOOKUP_TIMEOUT: Duration = Duration::from_millis(200);
-const TRACEROUTE_RDNS_BUDGET_CAP: Duration = Duration::from_millis(800);
+pub(crate) const TRACEROUTE_RDNS_BUDGET_CAP: Duration = Duration::from_millis(800);
 const TRACEROUTE_RDNS_MAX_CONCURRENCY: usize = 8;
 
 // ICMP message types
@@ -37,8 +37,8 @@ const ICMP_ECHO_REQUEST: u8 = 8;
 const ICMP_TIME_EXCEEDED: u8 = 11;
 
 // Minimum sizes for parsing received ICMP packets
-const ICMP_HEADER_LEN: usize = 8;
-const IP_HEADER_MIN_LEN: usize = 20;
+pub(crate) const ICMP_HEADER_LEN: usize = 8;
+pub(crate) const IP_HEADER_MIN_LEN: usize = 20;
 
 #[derive(Debug, Clone)]
 pub(crate) struct HopResult {
@@ -57,12 +57,25 @@ pub(crate) struct RawTracerouteResult {
 }
 
 #[derive(Debug)]
-struct TracerouteProbeError {
-    code: &'static str,
-    detail: String,
+pub(crate) struct TracerouteProbeError {
+    pub(crate) code: &'static str,
+    pub(crate) detail: String,
 }
 
-pub(crate) async fn probe(target: &str, deadline: tokio::time::Instant) -> ProbeOutcome {
+pub(crate) async fn probe(
+    target: &str,
+    mode: &TracerouteMode,
+    deadline: tokio::time::Instant,
+) -> ProbeOutcome {
+    match mode {
+        TracerouteMode::Icmp => probe_icmp(target, deadline).await,
+        TracerouteMode::TcpSizePair { port, packet_sizes } => {
+            super::traceroute_tcp::probe(target, *port, *packet_sizes, deadline).await
+        }
+    }
+}
+
+async fn probe_icmp(target: &str, deadline: tokio::time::Instant) -> ProbeOutcome {
     match run_traceroute(target, deadline).await {
         Ok(result) => {
             let outcome = if result.destination_reached {
@@ -154,7 +167,7 @@ fn create_icmp_raw_socket() -> Result<Socket, TracerouteProbeError> {
     Ok(s)
 }
 
-fn is_permission_error(e: &io::Error) -> bool {
+pub(crate) fn is_permission_error(e: &io::Error) -> bool {
     matches!(
         e.kind(),
         io::ErrorKind::PermissionDenied | io::ErrorKind::AddrNotAvailable
@@ -362,7 +375,7 @@ fn match_embedded_probe(icmp_data: &[u8], ident: u16, seq: u16) -> Option<bool> 
 }
 
 /// Strip the outer IP header from a RAW socket received buffer to get the ICMP payload.
-fn strip_ip_header(buf: &[u8]) -> &[u8] {
+pub(crate) fn strip_ip_header(buf: &[u8]) -> &[u8] {
     if buf.len() < IP_HEADER_MIN_LEN {
         return &[];
     }
@@ -402,7 +415,7 @@ fn icmp_checksum(data: &[u8]) -> u16 {
     !(sum as u16)
 }
 
-async fn async_send_to(
+pub(crate) async fn async_send_to(
     fd: &AsyncFd<Socket>,
     buf: &[u8],
     addr: &socket2::SockAddr,
@@ -416,7 +429,10 @@ async fn async_send_to(
     }
 }
 
-async fn async_recv_from(fd: &AsyncFd<Socket>, buf: &mut [u8]) -> io::Result<(usize, IpAddr)> {
+pub(crate) async fn async_recv_from(
+    fd: &AsyncFd<Socket>,
+    buf: &mut [u8],
+) -> io::Result<(usize, IpAddr)> {
     loop {
         let mut guard = fd.readable().await?;
         match guard.try_io(|inner| {
@@ -436,7 +452,7 @@ async fn async_recv_from(fd: &AsyncFd<Socket>, buf: &mut [u8]) -> io::Result<(us
     }
 }
 
-async fn resolve_traceroute_ipv4(
+pub(crate) async fn resolve_traceroute_ipv4(
     host: &str,
     deadline: tokio::time::Instant,
 ) -> Result<Ipv4Addr, TracerouteProbeError> {
@@ -491,7 +507,7 @@ async fn resolve_traceroute_ipv4(
     }
 }
 
-async fn probe_origin_ip(target_ip: Ipv4Addr) -> Option<Ipv4Addr> {
+pub(crate) async fn probe_origin_ip(target_ip: Ipv4Addr) -> Option<Ipv4Addr> {
     let socket = tokio::net::UdpSocket::bind("0.0.0.0:0").await.ok()?;
     socket.connect((target_ip, 33434)).await.ok()?;
     let local = socket.local_addr().ok()?;
@@ -618,24 +634,23 @@ fn traceroute_error_extra_v1(target: &str, detail: &str) -> Value {
     })
 }
 
-pub(crate) fn traceroute_extra_v1(
-    result: &RawTracerouteResult,
-    origin_ip: Option<Ipv4Addr>,
-    rdns: &HashMap<IpAddr, String>,
-) -> Value {
-    let display_max_ttl = result
-        .hops
+pub(crate) fn build_hop_entries(hops: &[HopResult], rdns: &HashMap<IpAddr, String>) -> Vec<Value> {
+    if hops.is_empty() {
+        return Vec::new();
+    }
+
+    let display_max_ttl = hops
         .iter()
         .map(|hop| hop.ttl)
         .max()
         .unwrap_or(TRACEROUTE_START_TTL);
 
     let mut by_ttl = HashMap::<u8, &HopResult>::new();
-    for hop in &result.hops {
+    for hop in hops {
         by_ttl.entry(hop.ttl).or_insert(hop);
     }
 
-    let hops = (TRACEROUTE_START_TTL..=display_max_ttl)
+    (TRACEROUTE_START_TTL..=display_max_ttl)
         .map(|ttl| {
             let Some(hop) = by_ttl.get(&ttl) else {
                 // TTL gap — no probe was sent (or result was lost); count as timeout
@@ -667,20 +682,28 @@ pub(crate) fn traceroute_extra_v1(
                 })
             }
         })
-        .collect::<Vec<_>>();
+        .collect::<Vec<_>>()
+}
 
-    let avg_rtt_ms = {
-        let rtts: Vec<f64> = result
-            .hops
-            .iter()
-            .filter_map(|h| h.rtt.map(|d| d.as_secs_f64() * 1000.0))
-            .collect();
-        if rtts.is_empty() {
-            None
-        } else {
-            Some(rtts.iter().sum::<f64>() / rtts.len() as f64)
-        }
-    };
+pub(crate) fn average_rtt_ms(hops: &[HopResult]) -> Option<f64> {
+    let rtts: Vec<f64> = hops
+        .iter()
+        .filter_map(|hop| hop.rtt.map(|d| d.as_secs_f64() * 1000.0))
+        .collect();
+    if rtts.is_empty() {
+        None
+    } else {
+        Some(rtts.iter().sum::<f64>() / rtts.len() as f64)
+    }
+}
+
+pub(crate) fn traceroute_extra_v1(
+    result: &RawTracerouteResult,
+    origin_ip: Option<Ipv4Addr>,
+    rdns: &HashMap<IpAddr, String>,
+) -> Value {
+    let hops = build_hop_entries(&result.hops, rdns);
+    let avg_rtt_ms = average_rtt_ms(&result.hops);
 
     serde_json::json!({
         "kind": "traceroute",

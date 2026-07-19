@@ -15,6 +15,27 @@ function isIpv6(value: string): boolean {
   return isIP(value) === 6;
 }
 
+const TRACEROUTE_TCP_PACKET_SIZE_MIN = 40;
+const TRACEROUTE_TCP_PACKET_SIZE_MAX = 1500;
+
+function parseTracerouteTcpPacketSizes(value: unknown): [number, number] | null {
+  if (!Array.isArray(value) || value.length !== 2) return null;
+  const [a, b] = value;
+  for (const size of [a, b]) {
+    if (
+      typeof size !== "number" ||
+      !Number.isFinite(size) ||
+      !Number.isInteger(size) ||
+      size < TRACEROUTE_TCP_PACKET_SIZE_MIN ||
+      size > TRACEROUTE_TCP_PACKET_SIZE_MAX
+    ) {
+      return null;
+    }
+  }
+  if (a === b) return null;
+  return a < b ? [a, b] : [b, a];
+}
+
 export const MAX_NAME_LEN = 200;
 export const MAX_NOTE_LEN = 2000;
 export const MAX_TAG_LEN = 64;
@@ -128,7 +149,21 @@ export function parseTarget(
     const host = typeof value["host"] === "string" ? value["host"].trim() : "";
     if (!host || !isValidHost(host)) return null;
     if (isIpv6(host)) return null;
-    const target = { host };
+
+    const protocol = value["protocol"];
+    if (protocol === undefined || protocol === "icmp") {
+      const target = { host };
+      return { target, targetJson: JSON.stringify(target) };
+    }
+    if (protocol !== "tcp") return null;
+
+    const port = typeof value["port"] === "number" ? value["port"] : Number.NaN;
+    if (!Number.isFinite(port) || !Number.isInteger(port) || port < 1 || port > 65535) return null;
+
+    const packetSizes = parseTracerouteTcpPacketSizes(value["packetSizes"]);
+    if (!packetSizes) return null;
+
+    const target = { host, protocol: "tcp" as const, port, packetSizes };
     return { target, targetJson: JSON.stringify(target) };
   }
 

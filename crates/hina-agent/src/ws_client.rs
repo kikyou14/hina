@@ -426,6 +426,20 @@ impl Drop for AbortOnDrop {
 }
 
 fn default_capabilities() -> Value {
+    let traceroute = if crate::probe::TCP_SIZE_PAIR_SUPPORTED {
+        serde_json::json!({
+            "protocols": ["icmp", "tcp"],
+            "tcpSizePair": true,
+            "resultVersions": [1, 2]
+        })
+    } else {
+        serde_json::json!({
+            "protocols": ["icmp"],
+            "tcpSizePair": false,
+            "resultVersions": [1]
+        })
+    };
+
     serde_json::json!({
         "telemetry": {
             "metrics": [
@@ -453,6 +467,9 @@ fn default_capabilities() -> Value {
             "traffic": {
                 "rx_tx": "sysinfo_network_totals"
             }
+        },
+        "probes": {
+            "traceroute": traceroute
         }
     })
 }

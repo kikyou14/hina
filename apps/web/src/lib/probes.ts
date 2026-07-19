@@ -9,7 +9,7 @@ export function formatProbeTarget(
   if (kind === "http") {
     return typeof record["url"] === "string" ? (record["url"] as string) : "-";
   }
-  if (kind === "tcp") {
+  if (kind === "tcp" || (kind === "traceroute" && record["protocol"] === "tcp")) {
     return typeof record["host"] === "string" && typeof record["port"] === "number"
       ? `${record["host"]}:${record["port"]}`
       : "-";

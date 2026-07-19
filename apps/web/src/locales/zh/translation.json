@@ -349,6 +349,12 @@
       "actions": "操作",
       "agents": "{{count}} 个节点"
     },
+    "tcpUnsupported": {
+      "someLabel": "{{unsupported}}/{{total}} 不支持",
+      "someTitle": "{{total}} 个目标节点中有 {{unsupported}} 个不支持 TCP 双尺寸探测，将跳过该任务。",
+      "noneLabel": "无节点支持",
+      "noneTitle": "{{total}} 个目标节点均不支持 TCP 双尺寸探测；在有支持的节点接入前，该任务不会在任何节点执行。"
+    },
     "form": {
       "intervalSec": "间隔 (秒)",
       "timeoutMs": "超时 (毫秒)",
@@ -358,12 +364,20 @@
       "url": "URL",
       "agents": "节点",
       "traceRevealHopDetails": "对外显示每跳详情",
+      "tracerouteProtocol": "协议",
+      "tracerouteProtocolIcmp": "ICMP",
+      "tracerouteProtocolTcp": "TCP 双尺寸对比",
+      "tracerouteSmallSize": "小包尺寸",
+      "tracerouteLargeSize": "大包尺寸",
+      "tracerouteSizeHint": "尺寸指 IPv4 包总长度（字节），包含 IP/TCP 头部。",
       "invalidInterval": "无效的间隔值。",
       "invalidTimeout": "无效的超时值。",
       "missingTarget": "缺少目标。",
       "invalidHost": "无效的主机地址：必须是合法的域名或 IP 地址。",
       "invalidPort": "无效的端口号：必须是 1–65535。",
       "invalidUrl": "无效的 URL：必须以 http:// 或 https:// 开头。",
+      "invalidPacketSize": "无效的包尺寸：必须是 40–1500 字节之间的整数。",
+      "duplicatePacketSizes": "两个包尺寸不能相同。",
       "tracerouteIpv6NotSupported": "Traceroute 仅支持 IPv4 目标（不支持 IPv6）。",
       "requestFailed": "请求失败。"
     },
@@ -383,7 +397,19 @@
       "hopsTimedOut": "{{count}} 跳超时",
       "internalHops": "{{count}} 跳（内网）",
       "networkPath": "网络路径",
-      "timeouts": "超时"
+      "timeouts": "超时",
+      "timeout": "超时",
+      "port": "端口 {{port}}",
+      "probeStyleTcpSynPayload": "TCP SYN + 负载",
+      "synPayloadNotice": "本次对比的是填充到不同大小的 TCP SYN 包，并不等价于已建立连接后发送大数据段的路径。单轮结果仅为观测，不代表确定的路由策略。",
+      "errorPacketTooLarge": "包过大（被 DF 阻止分片）",
+      "pathMtu": "路径 MTU {{mtu}} 字节",
+      "routeNotComparable": "数据不足，无法比较",
+      "routeDiverged": "路由在第 {{ttl}} 跳出现分叉",
+      "routeSame": "两个尺寸路径一致",
+      "routeNoDifference": "{{count}} 个可比较跳中未观察到差异",
+      "firstDivergence": "首次分叉",
+      "mtuLimitedHop": "MTU 受限"
     }
   },
   "settings": {

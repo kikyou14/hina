@@ -7,6 +7,7 @@ mod tcp;
 #[cfg(test)]
 mod tests;
 mod traceroute;
+mod traceroute_tcp;
 
 use std::{net::IpAddr, sync::Arc, time::Duration};
 
@@ -16,6 +17,7 @@ use tokio::net::lookup_host;
 pub(crate) use icmp::IcmpClients;
 pub(crate) use runner::ApplyConfigResult;
 pub use runner::ProbeRunner;
+pub(crate) use traceroute_tcp::TCP_SIZE_PAIR_SUPPORTED;
 
 use crate::protocol::ProbeResultBody;
 
@@ -36,11 +38,11 @@ pub(crate) async fn execute_probe(
         ProbeTarget::Tcp { host, port } => tcp::probe(host, *port, deadline).await,
         ProbeTarget::Http { url } => http::probe(http_client, url.clone(), spec.timeout).await,
         ProbeTarget::Icmp { host } => icmp::probe(icmp, host, deadline).await,
-        ProbeTarget::Traceroute { host } => {
+        ProbeTarget::Traceroute { host, mode } => {
             let _permit = trace_serial.acquire().await;
             let trace_deadline =
                 tokio::time::Instant::now() + spec.timeout.max(traceroute::TRACEROUTE_MIN_TIMEOUT);
-            traceroute::probe(host, trace_deadline).await
+            traceroute::probe(host, mode, trace_deadline).await
         }
     };
 

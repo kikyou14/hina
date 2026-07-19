@@ -128,6 +128,7 @@ export function useAdminLiveSync() {
       queryClient.invalidateQueries({ queryKey: ["admin", "agents"] });
       queryClient.invalidateQueries({ queryKey: ["admin", "agent"] });
       queryClient.invalidateQueries({ queryKey: ["admin", "agentProbeLatest"] });
+      queryClient.invalidateQueries({ queryKey: ["admin", "probeTasks"] });
     },
     onMessage(message) {
       if (message.type === "event.admin.agent_delta") {
@@ -149,6 +150,9 @@ export function useAdminLiveSync() {
           ["admin", "agent", message.agentId],
           (current) => (current ? patchAdminAgent(current, message) : current),
         );
+        if (message.system) {
+          queryClient.invalidateQueries({ queryKey: ["admin", "probeTasks"] });
+        }
         return;
       }
 

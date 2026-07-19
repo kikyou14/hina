@@ -18,9 +18,12 @@ export function canonicalizeAsn(asn: number): number {
 export type AsnInfoLike = { asn?: unknown };
 export type ResponseLike = { ip?: unknown; asn_info?: unknown };
 export type HopLike = { responses?: unknown };
+export type TraceLike = { packet_size_bytes?: unknown; hops?: unknown };
 export type TracerouteLike = {
   kind?: unknown;
+  v?: unknown;
   hops?: unknown;
+  traces?: unknown;
   target_ip?: unknown;
   destination_asn_info?: unknown;
 };
@@ -33,6 +36,30 @@ export type RouteObservation = {
 };
 
 export type RouteObservationQuality = "unusable" | "usable" | "strong";
+
+function selectSmallestSizeTraceHops(traces: unknown[]): unknown[] | null {
+  let bestSizeBytes = Number.POSITIVE_INFINITY;
+  let bestHops: unknown[] | null = null;
+
+  for (const trace of traces) {
+    if (typeof trace !== "object" || trace === null) continue;
+    const t = trace as TraceLike;
+    const sizeBytes = t.packet_size_bytes;
+    if (typeof sizeBytes !== "number" || !Number.isFinite(sizeBytes)) continue;
+    if (!Array.isArray(t.hops)) continue;
+    if (sizeBytes < bestSizeBytes) {
+      bestSizeBytes = sizeBytes;
+      bestHops = t.hops;
+    }
+  }
+
+  return bestHops;
+}
+
+function selectObservationHops(obj: TracerouteLike): unknown[] | null {
+  if (obj.v === 2 && Array.isArray(obj.traces)) return selectSmallestSizeTraceHops(obj.traces);
+  return Array.isArray(obj.hops) ? obj.hops : null;
+}
 
 export function extractRouteObservation(extraJson: string | null): RouteObservation | null {
   if (!extraJson) return null;
@@ -47,9 +74,11 @@ export function extractRouteObservation(extraJson: string | null): RouteObservat
   if (typeof parsed !== "object" || parsed === null) return null;
   const obj = parsed as TracerouteLike;
   if (obj.kind !== "traceroute") return null;
-  if (!Array.isArray(obj.hops)) return null;
 
-  const rawAsnPath = extractRawAsnPath(obj.hops as HopLike[]);
+  const hops = selectObservationHops(obj);
+  if (!hops) return null;
+
+  const rawAsnPath = extractRawAsnPath(hops as HopLike[]);
   if (rawAsnPath.length === 0) return null;
 
   const normalizedAsnPath = normalizeAsnPath(rawAsnPath);

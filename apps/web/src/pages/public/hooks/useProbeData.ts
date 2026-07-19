@@ -4,7 +4,7 @@ import { useQueries } from "@tanstack/react-query";
 import { getPublicProbeResultsSeries } from "@/api/public";
 import { useSiteConfig } from "@/components/SiteConfigProvider";
 import { usePublicAgentProbeLatest } from "@/queries/public";
-import { parseTracerouteExtraV1 } from "@/lib/traceroute";
+import { parseTracerouteView } from "@/lib/traceroute";
 
 import {
   buildLatencyChartSeries,
@@ -136,9 +136,15 @@ export function useProbeData(agentId: string) {
     [activeTraceTaskId, probeRecordByTaskId],
   );
   const traceLatest = traceRecord?.latest ?? null;
-  const traceExtra = React.useMemo(() => parseTracerouteExtraV1(traceLatest?.extra), [traceLatest?.extra]);
+  const traceView = React.useMemo(
+    () => parseTracerouteView(traceLatest?.extra),
+    [traceLatest?.extra],
+  );
   const canRenderTrace =
-    traceRecord?.task.kind === "traceroute" && traceLatest !== null && traceLatest.extraParseError !== true && traceExtra !== null;
+    traceRecord?.task.kind === "traceroute" &&
+    traceLatest !== null &&
+    traceLatest.extraParseError !== true &&
+    traceView !== null;
   const rawTraceText = traceLatest
     ? traceLatest.extraParseError
       ? traceLatest.extraRawJson ?? ""
@@ -258,7 +264,7 @@ export function useProbeData(agentId: string) {
     latencySeriesLoading,
     firstProbeSeriesError,
     traceLatest,
-    traceExtra,
+    traceView,
     canRenderTrace,
     rawTraceText,
   } as const;

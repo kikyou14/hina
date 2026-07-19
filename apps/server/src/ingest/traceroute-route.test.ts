@@ -5,8 +5,8 @@ import {
   isSignatureSubsequence,
 } from "./traceroute-route";
 
-function makeTracerouteJson(asns: (number | null)[]): string {
-  const hops = asns.map((asn, i) => ({
+function makeHops(asns: (number | null)[]) {
+  return asns.map((asn, i) => ({
     ttl: i + 1,
     responses:
       asn === null
@@ -14,7 +14,23 @@ function makeTracerouteJson(asns: (number | null)[]): string {
         : [{ ip: `10.0.0.${i + 1}`, asn_info: { asn } }],
     timeouts: asn === null ? 1 : 0,
   }));
-  return JSON.stringify({ kind: "traceroute", v: 1, hops });
+}
+
+function makeTracerouteJson(asns: (number | null)[]): string {
+  return JSON.stringify({ kind: "traceroute", v: 1, hops: makeHops(asns) });
+}
+
+function makeV2TracerouteJson(
+  traces: Array<{ packetSizeBytes: number; asns: (number | null)[] }>,
+): string {
+  return JSON.stringify({
+    kind: "traceroute",
+    v: 2,
+    traces: traces.map((t) => ({
+      packet_size_bytes: t.packetSizeBytes,
+      hops: makeHops(t.asns),
+    })),
+  });
 }
 
 describe("canonicalizeAsn", () => {
@@ -95,6 +111,74 @@ describe("extractRouteObservation", () => {
   test("returns null when no ASN info at all", () => {
     const obs = extractRouteObservation(makeTracerouteJson([null, null, null]));
     expect(obs).toBeNull();
+  });
+});
+
+describe("extractRouteObservation v2 (packet-size traces)", () => {
+  test("uses the smaller packet_size_bytes trace's hops when traces diverge", () => {
+    const json = makeV2TracerouteJson([
+      { packetSizeBytes: 1400, asns: [749, 6939] },
+      { packetSizeBytes: 64, asns: [749, 4837] },
+    ]);
+    const obs = extractRouteObservation(json);
+    expect(obs).not.toBeNull();
+    // Smaller trace (64 bytes) has [749, 4837], not the 1400-byte trace's [749, 6939].
+    expect(obs!.rawAsnPath).toEqual([749, 4837]);
+    expect(obs!.signature).toBe("749,4837");
+  });
+
+  test("smaller-size selection is independent of trace array order", () => {
+    const json = makeV2TracerouteJson([
+      { packetSizeBytes: 64, asns: [1, 2] },
+      { packetSizeBytes: 1400, asns: [1, 3] },
+    ]);
+    const obs = extractRouteObservation(json);
+    expect(obs!.rawAsnPath).toEqual([1, 2]);
+  });
+
+  test("ignores traces missing packet_size_bytes or hops", () => {
+    const json = JSON.stringify({
+      kind: "traceroute",
+      v: 2,
+      traces: [
+        { hops: makeHops([749, 4134]) }, // missing packet_size_bytes — skipped
+        { packet_size_bytes: 1400, asns: [749, 6939] }, // missing hops — skipped
+        { packet_size_bytes: 64, hops: makeHops([749, 4837]) },
+      ],
+    });
+    const obs = extractRouteObservation(json);
+    expect(obs!.rawAsnPath).toEqual([749, 4837]);
+  });
+
+  test("does not fall back to the larger trace when the smaller one has no ASN data", () => {
+    const json = makeV2TracerouteJson([
+      { packetSizeBytes: 64, asns: [null, null] },
+      { packetSizeBytes: 1400, asns: [749, 4837] },
+    ]);
+    // The smaller trace (64 bytes) is still the one selected, even though it
+    // has no usable ASN info — the spec says "use the smaller trace", not
+    // "use whichever trace looks better".
+    const obs = extractRouteObservation(json);
+    expect(obs).toBeNull();
+  });
+
+  test("returns null when no trace has any ASN info", () => {
+    const json = makeV2TracerouteJson([
+      { packetSizeBytes: 64, asns: [null, null] },
+      { packetSizeBytes: 1400, asns: [null, null] },
+    ]);
+    expect(extractRouteObservation(json)).toBeNull();
+  });
+
+  test("does not use v1's top-level hops when v is 2", () => {
+    const json = JSON.stringify({
+      kind: "traceroute",
+      v: 2,
+      hops: makeHops([1, 2, 3]), // malformed for v2, must not be picked up
+      traces: [{ packet_size_bytes: 64, hops: makeHops([9, 8]) }],
+    });
+    const obs = extractRouteObservation(json);
+    expect(obs!.rawAsnPath).toEqual([9, 8]);
   });
 });
 

@@ -222,7 +222,7 @@ export function PublicAgentPage() {
                 selectedTraceTaskId={probe.selectedTraceTaskId}
                 setSelectedTraceTaskId={probe.setSelectedTraceTaskId}
                 traceLatest={probe.traceLatest}
-                traceExtra={probe.traceExtra}
+                traceView={probe.traceView}
                 canRenderTrace={probe.canRenderTrace}
                 rawTraceText={probe.rawTraceText}
               />

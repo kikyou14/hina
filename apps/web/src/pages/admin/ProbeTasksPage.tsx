@@ -17,7 +17,7 @@ import {
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { GripVertical } from "lucide-react";
+import { AlertTriangle, GripVertical } from "lucide-react";
 import * as React from "react";
 import { useTranslation } from "react-i18next";
 
@@ -83,6 +83,39 @@ function ProbeScope({ task: tsk }: { task: AdminProbeTask }) {
   if (tsk.allAgents) return <>{t("scope.modes.all")}</>;
   if (tsk.groups.length > 0) return <>{tsk.groups.map((g) => g.name).join(", ")}</>;
   return <>{t("probes.table.agents", { count: tsk.agents.length })}</>;
+}
+
+function ProbeTcpUnsupportedWarning({ task: tsk }: { task: AdminProbeTask }) {
+  const { t } = useTranslation();
+  const support = tsk.tcpSizePairSupport;
+  if (!support || support.unsupportedAgents === 0) return null;
+
+  const runsNowhere = support.targetAgents - support.unsupportedAgents === 0;
+  return (
+    <span
+      className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] font-medium ${
+        runsNowhere
+          ? "bg-red-100 text-red-700 dark:bg-red-900/50 dark:text-red-300"
+          : "bg-amber-100 text-amber-700 dark:bg-amber-900/50 dark:text-amber-300"
+      }`}
+      title={
+        runsNowhere
+          ? t("probes.tcpUnsupported.noneTitle", { total: support.targetAgents })
+          : t("probes.tcpUnsupported.someTitle", {
+              unsupported: support.unsupportedAgents,
+              total: support.targetAgents,
+            })
+      }
+    >
+      <AlertTriangle className="size-3 shrink-0" />
+      {runsNowhere
+        ? t("probes.tcpUnsupported.noneLabel")
+        : t("probes.tcpUnsupported.someLabel", {
+            unsupported: support.unsupportedAgents,
+            total: support.targetAgents,
+          })}
+    </span>
+  );
 }
 
 function ProbeStatusBadge({ enabled }: { enabled: boolean }) {
@@ -176,6 +209,7 @@ function SortableProbeTaskRowCompact({
         <span>
           <ProbeScope task={tsk} />
         </span>
+        <ProbeTcpUnsupportedWarning task={tsk} />
       </div>
 
       <div className="mt-3 pl-8">
@@ -238,7 +272,10 @@ function SortableProbeTaskRow({
       </TableCell>
       <TableCell>{tsk.intervalSec}s</TableCell>
       <TableCell className="text-xs">
-        <ProbeScope task={tsk} />
+        <div className="flex flex-col items-start gap-1">
+          <ProbeScope task={tsk} />
+          <ProbeTcpUnsupportedWarning task={tsk} />
+        </div>
       </TableCell>
       <TableCell>
         <ProbeStatusBadge enabled={tsk.enabled} />

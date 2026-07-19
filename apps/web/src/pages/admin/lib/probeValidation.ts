@@ -43,3 +43,59 @@ export type ProbeTaskFormValue = {
   groupIds: string[];
   agentIds: string[];
 };
+
+export type TracerouteProtocol = "icmp" | "tcp";
+
+export type TcpTracerouteTarget = {
+  host: string;
+  protocol: "tcp";
+  port: number;
+  packetSizes: [number, number];
+};
+
+export function isTcpTracerouteTarget(
+  target: ProbeTaskTarget | null | undefined,
+): target is TcpTracerouteTarget {
+  if (!target) return false;
+  const record = target as Record<string, unknown>;
+  return record["protocol"] === "tcp" && Array.isArray(record["packetSizes"]);
+}
+
+export function tracerouteProtocolOfTarget(
+  target: ProbeTaskTarget | null | undefined,
+): TracerouteProtocol {
+  return isTcpTracerouteTarget(target) ? "tcp" : "icmp";
+}
+
+export function parseIntegerInput(raw: string): number | null {
+  const trimmed = raw.trim();
+  if (trimmed === "") return null;
+  const value = Number(trimmed);
+  return Number.isInteger(value) ? value : null;
+}
+
+export function isValidPort(value: number): boolean {
+  return Number.isInteger(value) && value >= 1 && value <= 65535;
+}
+
+export const TRACEROUTE_TCP_PACKET_SIZE_MIN = 40;
+export const TRACEROUTE_TCP_PACKET_SIZE_MAX = 1500;
+
+export function isValidTracerouteTcpPacketSize(value: number): boolean {
+  return (
+    Number.isInteger(value) &&
+    value >= TRACEROUTE_TCP_PACKET_SIZE_MIN &&
+    value <= TRACEROUTE_TCP_PACKET_SIZE_MAX
+  );
+}
+
+export function parseTracerouteTcpPacketSizes(
+  small: number,
+  large: number,
+): [number, number] | null {
+  if (!isValidTracerouteTcpPacketSize(small) || !isValidTracerouteTcpPacketSize(large)) {
+    return null;
+  }
+  if (small === large) return null;
+  return small < large ? [small, large] : [large, small];
+}

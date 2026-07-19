@@ -4,14 +4,14 @@ import { Route } from "lucide-react";
 
 import { TracerouteTraceDetail } from "@/components/probes/TracerouteTraceDetail";
 import type { PublicAgentProbeLatestResponse, PublicProbeLatest } from "@/api/public";
-import type { TracerouteExtraV1 } from "@/lib/traceroute";
+import type { TracerouteView } from "@/lib/traceroute";
 
 export type TracerouteCardProps = {
   traceProbeResults: PublicAgentProbeLatestResponse["results"];
   selectedTraceTaskId: string | null;
   setSelectedTraceTaskId: (id: string | null) => void;
   traceLatest: PublicProbeLatest | null;
-  traceExtra: TracerouteExtraV1 | null;
+  traceView: TracerouteView | null;
   canRenderTrace: boolean;
   rawTraceText: string;
 };
@@ -23,7 +23,7 @@ export const TracerouteCard = React.memo(function TracerouteCard(props: Tracerou
     selectedTraceTaskId,
     setSelectedTraceTaskId,
     traceLatest,
-    traceExtra,
+    traceView,
     canRenderTrace,
     rawTraceText,
   } = props;
@@ -81,9 +81,9 @@ export const TracerouteCard = React.memo(function TracerouteCard(props: Tracerou
           <div className="flex h-32 items-center justify-center text-sm text-muted-foreground">
             {t("common.noData")}
           </div>
-        ) : canRenderTrace && traceExtra ? (
+        ) : canRenderTrace && traceView ? (
           <TracerouteTraceDetail
-            extra={traceExtra}
+            view={traceView}
             taskName={selectedTask?.task.name ?? undefined}
           />
         ) : (

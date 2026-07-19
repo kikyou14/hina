@@ -349,6 +349,12 @@
       "actions": "Actions",
       "agents": "{{count}} agent(s)"
     },
+    "tcpUnsupported": {
+      "someLabel": "{{unsupported}}/{{total}} unsupported",
+      "someTitle": "{{unsupported}} of {{total}} target agents don't support TCP size comparison and will skip this task.",
+      "noneLabel": "No agent support",
+      "noneTitle": "None of the {{total}} target agents support TCP size comparison, so this task runs nowhere until a supporting agent connects."
+    },
     "form": {
       "intervalSec": "Interval (sec)",
       "timeoutMs": "Timeout (ms)",
@@ -358,12 +364,20 @@
       "url": "URL",
       "agents": "Agents",
       "traceRevealHopDetails": "Reveal hop details in public",
+      "tracerouteProtocol": "Protocol",
+      "tracerouteProtocolIcmp": "ICMP",
+      "tracerouteProtocolTcp": "TCP size comparison",
+      "tracerouteSmallSize": "Small packet size",
+      "tracerouteLargeSize": "Large packet size",
+      "tracerouteSizeHint": "Sizes are the total IPv4 packet length (bytes), including the IP/TCP headers.",
       "invalidInterval": "Invalid intervalSec.",
       "invalidTimeout": "Invalid timeoutMs.",
       "missingTarget": "Missing target.",
       "invalidHost": "Invalid host: must be a valid hostname or IP address.",
       "invalidPort": "Invalid port: must be 1–65535.",
       "invalidUrl": "Invalid URL: must start with http:// or https://.",
+      "invalidPacketSize": "Invalid packet size: must be an integer between 40 and 1500 bytes.",
+      "duplicatePacketSizes": "The two packet sizes must be different.",
       "tracerouteIpv6NotSupported": "Traceroute targets must be IPv4 (IPv6 is not supported).",
       "requestFailed": "Request failed."
     },
@@ -383,7 +397,19 @@
       "hopsTimedOut": "{{count}} hops timed out",
       "internalHops": "{{count}} hops (internal)",
       "networkPath": "Network Path",
-      "timeouts": "Timeouts"
+      "timeouts": "Timeouts",
+      "timeout": "Timeout",
+      "port": "Port {{port}}",
+      "probeStyleTcpSynPayload": "TCP SYN + payload",
+      "synPayloadNotice": "This compares TCP SYN packets padded to each size, not payload sent over an already-established connection. Treat a single run as an observation, not a confirmed routing policy.",
+      "errorPacketTooLarge": "Packet too large (blocked by DF)",
+      "pathMtu": "path MTU {{mtu}} B",
+      "routeNotComparable": "Not enough data to compare",
+      "routeDiverged": "Routes diverged at TTL #{{ttl}}",
+      "routeSame": "Same route observed",
+      "routeNoDifference": "No difference across {{count}} comparable hops",
+      "firstDivergence": "First divergence",
+      "mtuLimitedHop": "MTU limit"
     }
   },
   "settings": {

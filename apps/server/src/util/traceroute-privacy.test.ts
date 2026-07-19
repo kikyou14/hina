@@ -248,6 +248,281 @@ describe("anonymizeTracerouteExtraForPublic", () => {
   });
 });
 
+describe("anonymizeTracerouteExtraForPublic v2 (traces)", () => {
+  const v2Value = {
+    target: "example.com",
+    target_ip: "8.8.8.8",
+    origin_ip: "10.0.0.1",
+    destination_asn_info: { asn: 15169, name: "GOOGLE" },
+    traces: [
+      {
+        packet_size_bytes: 64,
+        destination_reached: true,
+        hops: [
+          {
+            ttl: 1,
+            responses: [
+              {
+                ip: "1.1.1.1",
+                hostname: "one.one.one.one",
+                asn_info: { asn: 13335, name: "CLOUDFLARENET" },
+              },
+            ],
+          },
+          {
+            ttl: 2,
+            responses: [
+              { ip: "8.8.8.8", hostname: "dns.google", asn_info: { asn: 15169, name: "GOOGLE" } },
+            ],
+          },
+        ],
+      },
+      {
+        packet_size_bytes: 1400,
+        destination_reached: false,
+        hops: [
+          {
+            ttl: 1,
+            responses: [
+              {
+                ip: "1.1.1.1",
+                hostname: "one.one.one.one",
+                asn_info: { asn: 13335, name: "CLOUDFLARENET" },
+              },
+            ],
+          },
+        ],
+      },
+    ],
+  };
+
+  test("has no top-level hops and does not throw", () => {
+    expect(() =>
+      anonymizeTracerouteExtraForPublic(v2Value, { revealHopDetails: true }),
+    ).not.toThrow();
+  });
+
+  test("nulls top-level target/target_ip/origin_ip and drops destination_asn_info", () => {
+    const out = anonymizeTracerouteExtraForPublic(v2Value, {
+      revealHopDetails: true,
+    }) as Record<string, unknown>;
+
+    expect(out.target).toBeNull();
+    expect(out.target_ip).toBeNull();
+    expect(out.origin_ip).toBeNull();
+    expect(Object.prototype.hasOwnProperty.call(out, "destination_asn_info")).toBe(false);
+  });
+
+  test("nulls ip and strips hostname/asn_info on every trace when revealHopDetails is off", () => {
+    const out = anonymizeTracerouteExtraForPublic(v2Value, {
+      revealHopDetails: false,
+    }) as { traces: Array<Record<string, unknown>> };
+
+    for (const trace of out.traces) {
+      const hops = trace.hops as Array<Record<string, unknown>>;
+      for (const hop of hops) {
+        for (const resp of hop.responses as Array<Record<string, unknown>>) {
+          expect(resp.ip).toBeNull();
+          expect(resp.hostname).toBeNull();
+          expect(Object.prototype.hasOwnProperty.call(resp, "asn_info")).toBe(false);
+        }
+      }
+    }
+  });
+
+  test("strips destination-hop hostname/asn_info per-trace using that trace's own destination_reached", () => {
+    const out = anonymizeTracerouteExtraForPublic(v2Value, {
+      revealHopDetails: true,
+    }) as { traces: Array<Record<string, unknown>> };
+
+    // Trace 0: destination_reached true — last hop (dns.google) is the
+    // destination and must have hostname/asn_info stripped despite
+    // revealHopDetails: true.
+    const trace0Hops = out.traces[0]!.hops as Array<Record<string, unknown>>;
+    const trace0Last = (trace0Hops[1]!.responses as Array<Record<string, unknown>>)[0]!;
+    expect(trace0Last.hostname).toBeNull();
+    expect(trace0Last.asn_info).toBeNull();
+    // Non-destination hop in the same trace keeps its details.
+    const trace0First = (trace0Hops[0]!.responses as Array<Record<string, unknown>>)[0]!;
+    expect(trace0First.hostname).toBe("one.one.one.one");
+    expect(trace0First.asn_info).toEqual({ asn: 13335, name: "CLOUDFLARENET" });
+
+    // Trace 1: destination_reached false — its last hop is untouched even
+    // though trace 0 reached the destination.
+    const trace1Hops = out.traces[1]!.hops as Array<Record<string, unknown>>;
+    const trace1Last = (trace1Hops[0]!.responses as Array<Record<string, unknown>>)[0]!;
+    expect(trace1Last.hostname).toBe("one.one.one.one");
+    expect(trace1Last.asn_info).toEqual({ asn: 13335, name: "CLOUDFLARENET" });
+  });
+
+  test("filters private-only hops independently per trace", () => {
+    const value = {
+      target: "example.com",
+      target_ip: "8.8.8.8",
+      origin_ip: null,
+      traces: [
+        {
+          packet_size_bytes: 64,
+          destination_reached: false,
+          hops: [
+            { ttl: 1, responses: [{ ip: "192.168.1.1", hostname: "gw" }] },
+            { ttl: 2, responses: [{ ip: "1.1.1.1", hostname: "one.one.one.one" }] },
+          ],
+        },
+        {
+          packet_size_bytes: 1400,
+          destination_reached: false,
+          hops: [{ ttl: 1, responses: [{ ip: "10.0.0.1", hostname: "internal" }] }],
+        },
+      ],
+    };
+
+    const out = anonymizeTracerouteExtraForPublic(value, {
+      revealHopDetails: true,
+    }) as { traces: Array<{ hops: unknown[] }> };
+
+    expect(out.traces[0]!.hops).toHaveLength(1);
+    expect(out.traces[1]!.hops).toHaveLength(0);
+  });
+
+  test("downgrades comparison when private-only divergence evidence is removed", () => {
+    const value = {
+      comparison: { comparable: true, route_diverged: true, first_diverging_ttl: 1 },
+      traces: [
+        {
+          packet_size_bytes: 64,
+          hops: [{ ttl: 1, responses: [{ ip: "192.168.1.1" }] }],
+        },
+        {
+          packet_size_bytes: 1400,
+          hops: [{ ttl: 1, responses: [{ ip: "10.0.0.1" }] }],
+        },
+      ],
+    };
+
+    const out = anonymizeTracerouteExtraForPublic(value, {
+      revealHopDetails: true,
+    }) as {
+      comparison: {
+        comparable: boolean;
+        route_diverged: boolean;
+        first_diverging_ttl: number | null;
+      };
+      traces: Array<{ hops: unknown[] }>;
+    };
+
+    expect(out.traces.map((trace) => trace.hops)).toEqual([[], []]);
+    expect(out.comparison).toEqual({
+      comparable: false,
+      route_diverged: false,
+      first_diverging_ttl: null,
+    });
+  });
+
+  test("recomputes the first divergence from remaining public hops", () => {
+    const value = {
+      comparison: { comparable: true, route_diverged: true, first_diverging_ttl: 1 },
+      traces: [
+        {
+          packet_size_bytes: 64,
+          hops: [
+            { ttl: 1, responses: [{ ip: "192.168.1.1" }] },
+            { ttl: 2, responses: [{ ip: "1.1.1.1" }] },
+            { ttl: 3, responses: [{ ip: "203.0.113.1" }] },
+          ],
+        },
+        {
+          packet_size_bytes: 1400,
+          hops: [
+            { ttl: 1, responses: [{ ip: "10.0.0.1" }] },
+            { ttl: 2, responses: [{ ip: "1.1.1.1" }] },
+            { ttl: 3, responses: [{ ip: "203.0.113.2" }] },
+          ],
+        },
+      ],
+    };
+
+    const out = anonymizeTracerouteExtraForPublic(value, {
+      revealHopDetails: true,
+    }) as Record<string, unknown>;
+
+    expect(out.comparison).toEqual({
+      comparable: true,
+      route_diverged: true,
+      first_diverging_ttl: 3,
+    });
+  });
+
+  test("does not treat the frag-needed reporter hop as divergence evidence", () => {
+    // The large trace's TTL-4 entry is the Fragmentation Needed reporter (the
+    // TTL-3 router answering at forwarding time); comparing it against the
+    // small trace's genuine TTL-4 hop would fabricate a fork.
+    const value = {
+      comparison: { comparable: true, route_diverged: true, first_diverging_ttl: 4 },
+      traces: [
+        {
+          packet_size_bytes: 64,
+          hops: [
+            { ttl: 3, responses: [{ ip: "203.0.113.3" }] },
+            { ttl: 4, responses: [{ ip: "203.0.113.4" }] },
+          ],
+        },
+        {
+          packet_size_bytes: 1400,
+          error_code: "packet_too_large",
+          frag_hop_ttl: 4,
+          hops: [
+            { ttl: 3, responses: [{ ip: "203.0.113.3" }] },
+            { ttl: 4, responses: [{ ip: "203.0.113.3" }] },
+          ],
+        },
+      ],
+    };
+
+    const out = anonymizeTracerouteExtraForPublic(value, {
+      revealHopDetails: true,
+    }) as Record<string, unknown>;
+
+    expect(out.comparison).toEqual({
+      comparable: true,
+      route_diverged: false,
+      first_diverging_ttl: null,
+    });
+  });
+
+  test("does not treat a timeout as public divergence evidence", () => {
+    const value = {
+      comparison: { comparable: true, route_diverged: true, first_diverging_ttl: 2 },
+      traces: [
+        {
+          packet_size_bytes: 64,
+          hops: [
+            { ttl: 1, responses: [{ ip: "1.1.1.1" }] },
+            { ttl: 2, responses: [] },
+          ],
+        },
+        {
+          packet_size_bytes: 1400,
+          hops: [
+            { ttl: 1, responses: [{ ip: "1.1.1.1" }] },
+            { ttl: 2, responses: [{ ip: "203.0.113.2" }] },
+          ],
+        },
+      ],
+    };
+
+    const out = anonymizeTracerouteExtraForPublic(value, {
+      revealHopDetails: true,
+    }) as Record<string, unknown>;
+
+    expect(out.comparison).toEqual({
+      comparable: true,
+      route_diverged: false,
+      first_diverging_ttl: null,
+    });
+  });
+});
+
 describe("sanitizeTracerouteExtraRawJsonForPublic", () => {
   const sampleInput =
     '{"target":"example.com","target_ip":"8.8.8.8","origin_ip":"10.0.0.1","hops":[{"ttl":1,"responses":[{"ip":"1.1.1.1","hostname":"one.one.one.one","asn_info":{"asn":13335,"prefix":"1.1.1.0/24","country_code":"US","registry":"APNIC","name":"CLOUDFLARENET"}}]}],"destination_asn_info":{"asn":15169,"prefix":"8.8.8.0/24","country_code":"US","registry":"ARIN","name":"GOOGLE"}}';
@@ -304,5 +579,26 @@ describe("sanitizeTracerouteExtraRawJsonForPublic", () => {
 
     expect(out).not.toContain("203.0.113.5");
     expect(out).toContain(PUBLIC_TRACEROUTE_IP_MASK);
+  });
+
+  test("v2 traces[]: nulls/masks nested ip, hostname, and asn_info the same as v1", () => {
+    // The regex fallback is structure-agnostic, but verify explicitly since a
+    // v2 payload nests the same field names one level deeper (inside `traces`).
+    const v2Input =
+      '{"target":"example.com","target_ip":"8.8.8.8","origin_ip":"10.0.0.1","traces":[{"packet_size_bytes":64,"hops":[{"ttl":1,"responses":[{"ip":"1.1.1.1","hostname":"one.one.one.one","asn_info":{"asn":13335,"name":"CLOUDFLARENET"}}]}]}],"destination_asn_info":{"asn":15169,"name":"GOOGLE"}}';
+
+    const out = sanitizeTracerouteExtraRawJsonForPublic(v2Input, { revealHopDetails: false });
+
+    expect(out).toContain('"target":null');
+    expect(out).toContain('"target_ip":null');
+    expect(out).toContain('"origin_ip":null');
+    expect(out).toContain('"ip":null');
+    expect(out).toContain('"hostname":null');
+    expect(out).toContain('"asn_info":null');
+    expect(out).toContain('"destination_asn_info":null');
+    expect(out).not.toContain("CLOUDFLARENET");
+    expect(out).not.toContain("GOOGLE");
+    expect(out).not.toContain("one.one.one.one");
+    expect(out).not.toContain("1.1.1.1");
   });
 });
