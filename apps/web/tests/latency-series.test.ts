@@ -129,37 +129,37 @@ describe("smoothLatencySeries", () => {
     ]);
   });
 
-  test("does not smooth across a large time gap", () => {
-    // Two probe failures right before an offline gap: without segmentation the
-    // last point before the gap would blend with values from the other side.
+  test("keeps levels distinct across a gap without inventing intermediate values", () => {
+    // The window crosses gaps, but the median plus the closest-sample
+    // tie-break keeps each side at its own level instead of blending them.
+    // The failure-flanked straggler before the gap merges into the outage.
     const left = makeSeries([10, 10, null, null, 10]);
     const gapMarker: LatencySeriesPoint = { t: 5_000, value: null, gap: true };
     const right = makeSeries([500, 500, 500, 500, 500], 60_000);
     const output = smoothLatencySeries([...left, gapMarker, ...right]);
-    expect(valuesOf(output)).toEqual([10, 10, null, null, 10, null, 500, 500, 500, 500, 500]);
+    expect(valuesOf(output)).toEqual([10, 10, null, null, null, null, 500, 500, 500, 500, 500]);
   });
 
-  test("keeps the last sample before a gap untouched by the other side", () => {
+  test("smooths an isolated spike before a time gap using both sides", () => {
     const left = makeSeries([10, 10, 1000]);
     const right = makeSeries([10, 10, 10, 10], 60_000);
     const output = smoothLatencySeries([...left, ...right]);
-    expect(valuesOf(output)).toEqual([10, 10, 1000, 10, 10, 10, 10]);
+    expect(valuesOf(output)).toEqual([10, 10, 10, 10, 10, 10, 10]);
   });
 
-  test("keeps a spike right before a gap marker untouched", () => {
-    // Real series always carry a null gap marker after the last sample before
-    // an outage; that marker must not dilute the sample preceding it.
+  test("smooths an isolated spike right before a gap marker", () => {
+    // The marker occupies a window slot without contributing a value; it must
+    // not shield the preceding spike from the samples across the outage.
     const left = makeSeries([10, 10, 1000]);
     const gapMarker: LatencySeriesPoint = { t: 3_000, value: null, gap: true };
     const right = makeSeries([10, 10, 10, 10], 60_000);
     const output = smoothLatencySeries([...left, gapMarker, ...right]);
-    expect(valuesOf(output)).toEqual([10, 10, 1000, null, 10, 10, 10, 10]);
+    expect(valuesOf(output)).toEqual([10, 10, 10, null, 10, 10, 10, 10]);
   });
 
-  test("keeps a spike before a short gap that only the marker reveals", () => {
+  test("smooths a spike before a short gap that only the marker reveals", () => {
     // Real gap of exactly 3 intervals: the marker sits 1 interval after the
-    // last sample, so marker -> next is 2 intervals and the time-delta rule
-    // alone would not split there — the gap flag must force the split.
+    // last sample before the outage and still takes part in the window.
     const series = buildLatencySeries(
       [
         { t: 0, value: 10 },
@@ -172,7 +172,42 @@ describe("smoothLatencySeries", () => {
       1_000,
     );
     const output = smoothLatencySeries(series);
-    expect(valuesOf(output)).toEqual([10, 10, 1000, null, 10, 10, 10]);
+    expect(valuesOf(output)).toEqual([10, 10, 10, null, 10, 10, 10]);
+  });
+
+  test("nulls an isolated success surrounded by failed probes", () => {
+    // One high-latency success inside a run of failures has no valid
+    // neighbors to smooth against; it must merge into the outage instead of
+    // surviving and stretching the Y axis.
+    const output = smoothLatencySeries(
+      makeSeries([10, 10, 10, null, null, 1000, null, null, 10, 10, 10]),
+    );
+    expect(valuesOf(output)).toEqual([10, 10, 10, null, null, null, null, null, 10, 10, 10]);
+  });
+
+  test("smooths an outage-edge spike toward the healthy side", () => {
+    const output = smoothLatencySeries(makeSeries([10, 10, 1000, null, null, null, 10, 10]));
+    expect(valuesOf(output)).toEqual([10, 10, 10, null, null, null, 10, 10]);
+  });
+
+  test("preserves a sustained degradation cluster inside an outage", () => {
+    const output = smoothLatencySeries(makeSeries([null, null, 900, 1000, 1100, null, null]));
+    expect(valuesOf(output)).toEqual([null, null, 1000, 1000, 1000, null, null]);
+  });
+
+  test("keeps values when valid samples reach half of the window", () => {
+    const output = smoothLatencySeries(makeSeries([10, null, 12, null, 10]));
+    expect(valuesOf(output)).toEqual([10, null, 10, null, 10]);
+  });
+
+  test("smooths a spike right after a gap marker", () => {
+    // First probe after an outage often carries an elevated latency; it must
+    // be judged against neighbors across the gap instead of passing through.
+    const left = makeSeries([10, 10]);
+    const gapMarker: LatencySeriesPoint = { t: 2_000, value: null, gap: true };
+    const right = makeSeries([1000, 10, 10], 60_000);
+    const output = smoothLatencySeries([...left, gapMarker, ...right]);
+    expect(valuesOf(output)).toEqual([10, 10, null, 10, 10, 10]);
   });
 
   test("wider windows remove longer spikes", () => {

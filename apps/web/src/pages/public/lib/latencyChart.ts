@@ -102,59 +102,34 @@ export function smoothLatencySeries(
 ): LatencySeriesPoint[] {
   if (points.length < 3) return [...points];
 
-  const maxRadius = windowSize >> 1;
-  const intervalMs = computeMedianIntervalMs(points.map((point) => point.t));
-  const gapThreshold = intervalMs === null ? Infinity : intervalMs * 2;
-  const result: LatencySeriesPoint[] = new Array(points.length);
+  const radius = windowSize >> 1;
 
-  const smoothSegment = (start: number, end: number) => {
-    let first = start;
-    while (first < end && points[first]!.value === null) {
-      result[first] = points[first]!;
-      first += 1;
-    }
-    let last = end - 1;
-    while (last >= first && points[last]!.value === null) {
-      result[last] = points[last]!;
-      last -= 1;
-    }
-    for (let i = first; i <= last; i += 1) {
-      const point = points[i]!;
-      const current = point.value;
-      if (current === null) {
-        result[i] = point;
-        continue;
-      }
-      const radius = Math.min(maxRadius, i - first, last - i);
-      const values: number[] = [];
-      for (let j = i - radius; j <= i + radius; j += 1) {
-        const v = points[j]!.value;
-        if (v !== null) values.push(v);
-      }
-      values.sort((a, b) => a - b);
-      const mid = values.length >> 1;
-      let median: number;
-      if (values.length % 2 === 1) {
-        median = values[mid]!;
-      } else {
-        const lo = values[mid - 1]!;
-        const hi = values[mid]!;
-        median = Math.abs(current - lo) <= Math.abs(current - hi) ? lo : hi;
-      }
-      result[i] = { t: point.t, value: median };
-    }
-  };
+  return points.map((point, i) => {
+    const current = point.value;
+    if (current === null) return point;
 
-  let segmentStart = 0;
-  for (let i = 1; i < points.length; i += 1) {
-    if (points[i]!.gap === true || points[i]!.t - points[i - 1]!.t > gapThreshold) {
-      smoothSegment(segmentStart, i);
-      segmentStart = i;
-    }
-  }
-  smoothSegment(segmentStart, points.length);
+    const start = Math.max(0, i - radius);
+    const end = Math.min(points.length - 1, i + radius);
 
-  return result;
+    const values: number[] = [];
+    for (let j = start; j <= end; j += 1) {
+      const v = points[j]!.value;
+      if (v !== null) values.push(v);
+    }
+
+    if (values.length * 2 < end - start + 1) {
+      return { t: point.t, value: null };
+    }
+
+    values.sort((a, b) => a - b);
+    const mid = values.length >> 1;
+    if (values.length % 2 === 1) {
+      return { t: point.t, value: values[mid]! };
+    }
+    const lo = values[mid - 1]!;
+    const hi = values[mid]!;
+    return { t: point.t, value: Math.abs(current - lo) <= Math.abs(current - hi) ? lo : hi };
+  });
 }
 
 function estimateRawPointCount(rangeMs: number, taskIntervalSec: number | null | undefined): number | null {
