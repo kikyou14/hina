@@ -7,6 +7,7 @@ import { registerAdminAccountRoutes } from "./routes-account";
 import { registerAdminAgentsRoutes } from "./routes-agents";
 import { registerAdminAlertRoutes } from "./routes-alerts";
 import { registerAdminAuditRoutes } from "./routes-audit";
+import { registerAdminLogRoutes } from "./routes-logs";
 import { registerAdminProbeTaskRoutes } from "./routes-probes";
 import { registerAdminLoginRoutes, registerAdminSessionRoutes } from "./routes-session";
 import { registerAdminSiteConfigRoutes } from "./routes-site-config";
@@ -30,6 +31,7 @@ export function createAdminRouter(touchThrottler: SessionTouchThrottler, dbPath:
 
   registerAdminSessionRoutes(router, touchThrottler);
   registerAdminAccountRoutes(router, touchThrottler);
+  registerAdminLogRoutes(router);
   registerAdminAuditRoutes(router);
   registerAdminSystemRoutes(router, dbPath);
   registerAdminSiteConfigRoutes(router);

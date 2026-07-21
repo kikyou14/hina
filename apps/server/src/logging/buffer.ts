@@ -1,12 +1,23 @@
+import { randomUUID } from "node:crypto";
 import util from "node:util";
 
 export type LogLevel = "info" | "warn" | "error";
 
 export type LogEntry = {
+  id: string;
   tsMs: number;
   level: LogLevel;
   source: string;
   msg: string;
+};
+
+export type LogEntryInput = Omit<LogEntry, "id">;
+
+export type LogListResult = {
+  entries: LogEntry[];
+  nextCursor: string;
+  hasMore: boolean;
+  reset: boolean;
 };
 
 const DEFAULT_MAX_ENTRIES = 2000;
@@ -19,30 +30,96 @@ function clampText(value: string): string {
 
 export class LogRingBuffer {
   private readonly maxEntries: number;
+  private readonly generation: string;
   private entries: LogEntry[] = [];
+  private sequence = 0;
 
-  constructor(maxEntries: number = DEFAULT_MAX_ENTRIES) {
+  constructor(maxEntries: number = DEFAULT_MAX_ENTRIES, generation: string = randomUUID()) {
     this.maxEntries = Math.min(Math.max(100, Math.floor(maxEntries)), 50_000);
+    this.generation = generation;
   }
 
-  push(entry: LogEntry) {
-    this.entries.push({ ...entry, msg: clampText(entry.msg) });
+  push(entry: LogEntryInput): LogEntry {
+    const stored = {
+      ...entry,
+      id: this.cursorFor(++this.sequence),
+      msg: clampText(entry.msg),
+    };
+    this.entries.push(stored);
     const overflow = this.entries.length - this.maxEntries;
     if (overflow > 0) this.entries.splice(0, overflow);
+    return stored;
   }
 
-  list(args?: { sinceTsMs?: number; limit?: number }): LogEntry[] {
-    const sinceTsMs = args?.sinceTsMs;
-    const limitRaw = args?.limit ?? 200;
-    const limit = Math.min(Math.max(1, Math.floor(limitRaw)), this.maxEntries);
+  list(args?: { after?: string; sinceTsMs?: number; limit?: number }): LogListResult {
+    const limit = this.clampLimit(args?.limit);
+    const after = args?.after;
 
-    let out = this.entries;
-    if (sinceTsMs !== undefined && Number.isFinite(sinceTsMs)) {
-      out = out.filter((e) => e.tsMs > sinceTsMs);
+    if (after !== undefined) {
+      const parsed = this.parseCursor(after);
+      if (!parsed || parsed.generation !== this.generation) {
+        return this.initialPage(limit, true);
+      }
+
+      const oldestSequence = this.sequence - this.entries.length + 1;
+      const cursorIsBeforeAvailableRange = parsed.sequence < oldestSequence - 1;
+      const cursorIsAhead = parsed.sequence > this.sequence;
+      if (cursorIsBeforeAvailableRange || cursorIsAhead) {
+        return this.initialPage(limit, true);
+      }
+
+      const startIndex = Math.max(0, parsed.sequence - oldestSequence + 1);
+      const entries = this.entries.slice(startIndex, startIndex + limit);
+      return {
+        entries,
+        nextCursor: entries.at(-1)?.id ?? this.cursorFor(this.sequence),
+        hasMore: startIndex + entries.length < this.entries.length,
+        reset: false,
+      };
     }
 
-    if (out.length > limit) out = out.slice(out.length - limit);
-    return out;
+    const sinceTsMs = args?.sinceTsMs;
+    if (sinceTsMs !== undefined && Number.isFinite(sinceTsMs)) {
+      const matching = this.entries.filter((entry) => entry.tsMs > sinceTsMs);
+      const entries = matching.slice(Math.max(0, matching.length - limit));
+      return {
+        entries,
+        nextCursor: this.cursorFor(this.sequence),
+        hasMore: false,
+        reset: false,
+      };
+    }
+
+    return this.initialPage(limit, false);
+  }
+
+  private clampLimit(limitRaw: number | undefined): number {
+    if (limitRaw === undefined || !Number.isFinite(limitRaw)) return 200;
+    return Math.min(Math.max(0, Math.floor(limitRaw)), this.maxEntries);
+  }
+
+  private initialPage(limit: number, reset: boolean): LogListResult {
+    const entries = this.entries.slice(Math.max(0, this.entries.length - limit));
+    return {
+      entries,
+      nextCursor: this.cursorFor(this.sequence),
+      hasMore: false,
+      reset,
+    };
+  }
+
+  private cursorFor(sequence: number): string {
+    return `${this.generation}:${sequence}`;
+  }
+
+  private parseCursor(cursor: string): { generation: string; sequence: number } | null {
+    const separator = cursor.lastIndexOf(":");
+    if (separator <= 0) return null;
+
+    const generation = cursor.slice(0, separator);
+    const sequence = Number(cursor.slice(separator + 1));
+    if (!Number.isSafeInteger(sequence) || sequence < 0) return null;
+    return { generation, sequence };
   }
 }
 

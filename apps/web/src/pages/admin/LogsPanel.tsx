@@ -1,3 +1,4 @@
+import { useVirtualizer } from "@tanstack/react-virtual";
 import * as React from "react";
 import { useTranslation } from "react-i18next";
 
@@ -11,6 +12,23 @@ import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { formatIsoShort } from "@/lib/time";
 import { getUserErrorMessage } from "@/lib/userErrors";
+import { appendUniqueLogEntries, MAX_LOG_ENTRIES } from "./logEntries";
+
+const POLL_INTERVAL_MS = 2000;
+const LOG_ROW_ESTIMATE_PX = 24;
+const LOG_OVERSCAN = 12;
+
+type LoadMode = "reset" | "append" | "clear";
+
+type ActiveRequest = {
+  controller: AbortController;
+  mode: LoadMode;
+  version: number;
+};
+
+function isAbortError(error: unknown): boolean {
+  return error instanceof Error && error.name === "AbortError";
+}
 
 function levelVariant(
   level: AdminLogEntry["level"],
@@ -31,15 +49,27 @@ export function LogsPanel() {
   const [error, setError] = React.useState<string | null>(null);
   const [loaded, setLoaded] = React.useState(false);
   const [entries, setEntries] = React.useState<AdminLogEntry[]>([]);
+  const [measurementEpoch, advanceMeasurementEpoch] = React.useReducer(
+    (epoch: number) => epoch + 1,
+    0,
+  );
 
-  const sinceRef = React.useRef<number | undefined>(undefined);
+  const cursorRef = React.useRef<string | undefined>(undefined);
   const listRef = React.useRef<HTMLDivElement | null>(null);
+  const activeRequestRef = React.useRef<ActiveRequest | null>(null);
+  const pendingClearRef = React.useRef(false);
+  const requestVersionRef = React.useRef(0);
 
-  const trimAndSet = React.useCallback((next: AdminLogEntry[]) => {
-    const max = 5000;
-    if (next.length <= max) return next;
-    return next.slice(next.length - max);
-  }, []);
+  const getScrollElement = React.useCallback(() => listRef.current, []);
+  const estimateRowSize = React.useCallback(() => LOG_ROW_ESTIMATE_PX, []);
+  const getItemKey = React.useCallback((index: number) => entries[index]?.id ?? index, [entries]);
+  const rowVirtualizer = useVirtualizer<HTMLDivElement, HTMLDivElement>({
+    count: entries.length,
+    getScrollElement,
+    estimateSize: estimateRowSize,
+    getItemKey,
+    overscan: LOG_OVERSCAN,
+  });
 
   const commitLimit = React.useCallback(() => {
     const next = Math.min(Math.max(50, Number(limitInput) || 500), 2000);
@@ -47,52 +77,122 @@ export function LogsPanel() {
     setLimitInput(String(next));
   }, [limitInput]);
 
+  const cancelActiveRequest = React.useCallback((mode?: LoadMode) => {
+    const activeRequest = activeRequestRef.current;
+    if (!activeRequest || (mode !== undefined && activeRequest.mode !== mode)) return;
+
+    requestVersionRef.current += 1;
+    activeRequest.controller.abort();
+    activeRequestRef.current = null;
+  }, []);
+
   const load = React.useCallback(
-    async (mode: "reset" | "append") => {
+    async (mode: LoadMode): Promise<boolean> => {
+      // Do not let append/reset cross a clear boundary until its server snapshot succeeds.
+      const requestMode = pendingClearRef.current ? "clear" : mode;
+      const requestVersion = requestVersionRef.current + 1;
+      requestVersionRef.current = requestVersion;
+      activeRequestRef.current?.controller.abort();
+      const controller = new AbortController();
+      activeRequestRef.current = { controller, mode: requestMode, version: requestVersion };
+
       try {
         setError(null);
         const res = await getAdminLogs({
-          limit,
-          sinceTsMs: mode === "append" ? sinceRef.current : undefined,
+          after: requestMode === "append" ? cursorRef.current : undefined,
+          limit: requestMode === "clear" ? 0 : limit,
+          signal: controller.signal,
         });
 
-        if (mode === "reset") {
-          setEntries(res.entries);
-        } else if (res.entries.length > 0) {
-          setEntries((prev) => trimAndSet([...prev, ...res.entries]));
+        if (controller.signal.aborted || requestVersion !== requestVersionRef.current) {
+          return false;
         }
 
-        const last = res.entries.length ? res.entries[res.entries.length - 1] : null;
-        if (last) sinceRef.current = last.tsMs;
+        cursorRef.current = res.nextCursor;
+        if (requestMode === "clear") {
+          pendingClearRef.current = false;
+          setEntries([]);
+        } else if (requestMode === "reset" || res.reset) {
+          setEntries(res.entries.slice(-MAX_LOG_ENTRIES));
+        } else if (res.entries.length > 0) {
+          setEntries((current) => appendUniqueLogEntries(current, res.entries));
+        }
+
         setLoaded(true);
+        return res.hasMore;
       } catch (err) {
+        if (isAbortError(err) || requestVersion !== requestVersionRef.current) {
+          return false;
+        }
         setError(
           getUserErrorMessage(err, t, {
             action: "load",
             fallback: t("logs.failedToLoad"),
           }),
         );
+        return false;
+      } finally {
+        if (activeRequestRef.current?.version === requestVersion) {
+          activeRequestRef.current = null;
+        }
       }
     },
-    [limit, trimAndSet, t],
+    [limit, t],
   );
 
   React.useEffect(() => {
     void load("reset");
-  }, [load]);
+    return () => cancelActiveRequest();
+  }, [cancelActiveRequest, load]);
 
   React.useEffect(() => {
     if (!auto) return;
-    const timer = setInterval(() => void load("append"), 2000);
-    return () => clearInterval(timer);
-  }, [auto, load]);
 
-  React.useEffect(() => {
-    if (!stickToBottom) return;
-    const el = listRef.current;
-    if (!el) return;
-    el.scrollTop = el.scrollHeight;
-  }, [entries, stickToBottom]);
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const schedule = (delayMs: number) => {
+      timer = setTimeout(() => void poll(), delayMs);
+    };
+    const poll = async () => {
+      if (cancelled) return;
+      if (activeRequestRef.current) {
+        schedule(POLL_INTERVAL_MS);
+        return;
+      }
+
+      const hasMore = await load(pendingClearRef.current ? "clear" : "append");
+      if (!cancelled) schedule(hasMore ? 0 : POLL_INTERVAL_MS);
+    };
+
+    schedule(POLL_INTERVAL_MS);
+    return () => {
+      cancelled = true;
+      if (timer !== undefined) clearTimeout(timer);
+      cancelActiveRequest("append");
+    };
+  }, [auto, cancelActiveRequest, load]);
+
+  const firstEntryId = entries[0]?.id;
+  const previousFirstEntryIdRef = React.useRef(firstEntryId);
+  React.useLayoutEffect(() => {
+    if (previousFirstEntryIdRef.current === firstEntryId) return;
+    previousFirstEntryIdRef.current = firstEntryId;
+    rowVirtualizer.measure();
+    advanceMeasurementEpoch();
+  }, [firstEntryId, rowVirtualizer]);
+
+  const lastEntryId = entries.at(-1)?.id;
+  React.useLayoutEffect(() => {
+    if (!stickToBottom || lastEntryId === undefined) return;
+    rowVirtualizer.scrollToIndex(entries.length - 1, { align: "end" });
+  }, [entries.length, lastEntryId, rowVirtualizer, stickToBottom]);
+
+  const clearLogs = React.useCallback(() => {
+    pendingClearRef.current = true;
+    setEntries([]);
+    setLoaded(true);
+    void load("clear");
+  }, [load]);
 
   return (
     <Card>
@@ -126,13 +226,7 @@ export function LogsPanel() {
               <Button variant="outline" onClick={() => void load("reset")}>
                 {t("common.refresh")}
               </Button>
-              <Button
-                variant="outline"
-                onClick={() => {
-                  sinceRef.current = Date.now();
-                  setEntries([]);
-                }}
-              >
+              <Button variant="outline" onClick={clearLogs}>
                 {t("common.clear")}
               </Button>
             </div>
@@ -149,21 +243,50 @@ export function LogsPanel() {
           ref={listRef}
           className="bg-muted/30 h-130 overflow-auto rounded-md border p-3 font-mono text-xs leading-relaxed"
         >
-          {loaded && entries.length === 0 && (
+          {loaded && entries.length === 0 ? (
             <div className="text-muted-foreground">{t("logs.noLogs")}</div>
-          )}
-          {entries.map((e, idx) => (
-            <div key={`${e.tsMs}:${idx}`} className="flex gap-3">
-              <div className="text-muted-foreground w-37.5 shrink-0">
-                {formatIsoShort(e.tsMs, timezone)}
-              </div>
-              <div className="w-18 shrink-0">
-                <Badge variant={levelVariant(e.level)}>{e.level}</Badge>
-              </div>
-              <div className="text-muted-foreground w-14 shrink-0">{e.source ?? "system"}</div>
-              <div className="min-w-0 wrap-break-word whitespace-pre-wrap">{e.msg}</div>
+          ) : null}
+          {entries.length > 0 ? (
+            <div
+              style={{
+                height: rowVirtualizer.getTotalSize(),
+                position: "relative",
+                width: "100%",
+              }}
+            >
+              {rowVirtualizer.getVirtualItems().map((virtualRow) => {
+                const entry = entries[virtualRow.index];
+                if (!entry) return null;
+
+                return (
+                  <div
+                    key={`${measurementEpoch}:${virtualRow.key}`}
+                    data-index={virtualRow.index}
+                    ref={rowVirtualizer.measureElement}
+                    className="flex gap-3"
+                    style={{
+                      left: 0,
+                      position: "absolute",
+                      top: 0,
+                      transform: `translateY(${virtualRow.start}px)`,
+                      width: "100%",
+                    }}
+                  >
+                    <div className="text-muted-foreground w-37.5 shrink-0">
+                      {formatIsoShort(entry.tsMs, timezone)}
+                    </div>
+                    <div className="w-18 shrink-0">
+                      <Badge variant={levelVariant(entry.level)}>{entry.level}</Badge>
+                    </div>
+                    <div className="text-muted-foreground w-14 shrink-0">
+                      {entry.source ?? "system"}
+                    </div>
+                    <div className="min-w-0 wrap-break-word whitespace-pre-wrap">{entry.msg}</div>
+                  </div>
+                );
+              })}
             </div>
-          ))}
+          ) : null}
         </div>
       </CardContent>
     </Card>

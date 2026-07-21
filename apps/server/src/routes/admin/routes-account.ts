@@ -10,9 +10,8 @@ import {
   revokeUserSessions,
 } from "../../auth/session";
 import { user as userTable } from "../../db/schema";
-import { logBuffer } from "../../logging/buffer";
 import { isSecureRequest } from "../../util/http";
-import { parseNonNegativeIntQuery, parsePositiveIntQuery, isRecord } from "./parsing";
+import { isRecord } from "./parsing";
 
 const accountMutationLimiter = rateLimiter<AppContext>({
   windowMs: 60_000,
@@ -139,15 +138,5 @@ export function registerAdminAccountRoutes(
       sameSite: "Strict",
     });
     return c.json({ ok: true });
-  });
-
-  router.get("/logs", async (c) => {
-    const limit = Math.min(parsePositiveIntQuery(c.req.query("limit")) ?? 200, 2000);
-    const sinceTsMs = parseNonNegativeIntQuery(c.req.query("sinceTsMs"));
-    const entries = logBuffer.list({
-      sinceTsMs: sinceTsMs ?? undefined,
-      limit,
-    });
-    return c.json({ nowMs: Date.now(), entries });
   });
 }
