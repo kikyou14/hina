@@ -129,6 +129,16 @@ export type RouteChangeEvent = {
   prevSignature: string;
 };
 
+const ROUTE_STATE_CHUNK_SIZE = 300;
+
+function chunk<T>(items: readonly T[], size: number): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < items.length; i += size) {
+    out.push(items.slice(i, i + size));
+  }
+  return out;
+}
+
 export async function ingestTracerouteResultsBatch(
   tx: DbTx,
   batch: ProbeResultIngestArgs[],
@@ -240,28 +250,29 @@ async function batchLoadRouteStates(
   keys: Array<{ agentId: string; taskId: string }>,
 ): Promise<Map<string, RouteState>> {
   const result = new Map<string, RouteState>();
-  if (keys.length === 0) return result;
 
-  const conditions = keys.map((k) =>
-    and(eq(routeChangeState.agentId, k.agentId), eq(routeChangeState.taskId, k.taskId)),
-  );
+  for (const group of chunk(keys, ROUTE_STATE_CHUNK_SIZE)) {
+    const conditions = group.map((k) =>
+      and(eq(routeChangeState.agentId, k.agentId), eq(routeChangeState.taskId, k.taskId)),
+    );
 
-  const rows = await tx
-    .select()
-    .from(routeChangeState)
-    .where(conditions.length === 1 ? conditions[0] : or(...conditions));
+    const rows = await tx
+      .select()
+      .from(routeChangeState)
+      .where(conditions.length === 1 ? conditions[0] : or(...conditions));
 
-  for (const row of rows) {
-    result.set(routeStateKey(row.agentId, row.taskId), {
-      stableSignature: row.stableSignature,
-      stableObservedAtMs: row.stableObservedAtMs,
-      candidateSignature: row.candidateSignature,
-      candidateFirstSeenAtMs: row.candidateFirstSeenAtMs,
-      candidateLastSeenAtMs: row.candidateLastSeenAtMs,
-      candidateSeenCount: row.candidateSeenCount,
-      candidateStrongSeenCount: row.candidateStrongSeenCount,
-      lastObservationTsMs: row.lastObservationTsMs,
-    });
+    for (const row of rows) {
+      result.set(routeStateKey(row.agentId, row.taskId), {
+        stableSignature: row.stableSignature,
+        stableObservedAtMs: row.stableObservedAtMs,
+        candidateSignature: row.candidateSignature,
+        candidateFirstSeenAtMs: row.candidateFirstSeenAtMs,
+        candidateLastSeenAtMs: row.candidateLastSeenAtMs,
+        candidateSeenCount: row.candidateSeenCount,
+        candidateStrongSeenCount: row.candidateStrongSeenCount,
+        lastObservationTsMs: row.lastObservationTsMs,
+      });
+    }
   }
 
   return result;
@@ -271,46 +282,49 @@ async function batchSaveRouteStates(
   tx: DbTx,
   updates: Array<{ agentId: string; taskId: string; state: RouteState; nowMs: number }>,
 ): Promise<void> {
-  if (updates.length === 0) return;
+  for (const group of chunk(updates, ROUTE_STATE_CHUNK_SIZE)) {
+    const values = group.map((u) => ({
+      agentId: u.agentId,
+      taskId: u.taskId,
+      stableSignature: u.state.stableSignature,
+      stableObservedAtMs: u.state.stableObservedAtMs,
+      candidateSignature: u.state.candidateSignature,
+      candidateFirstSeenAtMs: u.state.candidateFirstSeenAtMs,
+      candidateLastSeenAtMs: u.state.candidateLastSeenAtMs,
+      candidateSeenCount: u.state.candidateSeenCount,
+      candidateStrongSeenCount: u.state.candidateStrongSeenCount,
+      lastObservationTsMs: u.state.lastObservationTsMs,
+      updatedAtMs: u.nowMs,
+    }));
 
-  const values = updates.map((u) => ({
-    agentId: u.agentId,
-    taskId: u.taskId,
-    stableSignature: u.state.stableSignature,
-    stableObservedAtMs: u.state.stableObservedAtMs,
-    candidateSignature: u.state.candidateSignature,
-    candidateFirstSeenAtMs: u.state.candidateFirstSeenAtMs,
-    candidateLastSeenAtMs: u.state.candidateLastSeenAtMs,
-    candidateSeenCount: u.state.candidateSeenCount,
-    candidateStrongSeenCount: u.state.candidateStrongSeenCount,
-    lastObservationTsMs: u.state.lastObservationTsMs,
-    updatedAtMs: u.nowMs,
-  }));
-
-  await tx
-    .insert(routeChangeState)
-    .values(values)
-    .onConflictDoUpdate({
-      target: [routeChangeState.agentId, routeChangeState.taskId],
-      set: {
-        stableSignature: sql`excluded.stable_signature`,
-        stableObservedAtMs: sql`excluded.stable_observed_at_ms`,
-        candidateSignature: sql`excluded.candidate_signature`,
-        candidateFirstSeenAtMs: sql`excluded.candidate_first_seen_at_ms`,
-        candidateLastSeenAtMs: sql`excluded.candidate_last_seen_at_ms`,
-        candidateSeenCount: sql`excluded.candidate_seen_count`,
-        candidateStrongSeenCount: sql`excluded.candidate_strong_seen_count`,
-        lastObservationTsMs: sql`excluded.last_observation_ts_ms`,
-        updatedAtMs: sql`excluded.updated_at_ms`,
-      },
-    });
+    await tx
+      .insert(routeChangeState)
+      .values(values)
+      .onConflictDoUpdate({
+        target: [routeChangeState.agentId, routeChangeState.taskId],
+        set: {
+          stableSignature: sql`excluded.stable_signature`,
+          stableObservedAtMs: sql`excluded.stable_observed_at_ms`,
+          candidateSignature: sql`excluded.candidate_signature`,
+          candidateFirstSeenAtMs: sql`excluded.candidate_first_seen_at_ms`,
+          candidateLastSeenAtMs: sql`excluded.candidate_last_seen_at_ms`,
+          candidateSeenCount: sql`excluded.candidate_seen_count`,
+          candidateStrongSeenCount: sql`excluded.candidate_strong_seen_count`,
+          lastObservationTsMs: sql`excluded.last_observation_ts_ms`,
+          updatedAtMs: sql`excluded.updated_at_ms`,
+        },
+      });
+  }
 }
 
 async function loadTaskIntervals(tx: DbTx, taskIds: string[]): Promise<Map<string, number>> {
-  if (taskIds.length === 0) return new Map();
-  const rows = await tx
-    .select({ id: probeTask.id, intervalSec: probeTask.intervalSec })
-    .from(probeTask)
-    .where(inArray(probeTask.id, taskIds));
-  return new Map(rows.map((r) => [r.id, r.intervalSec]));
+  const map = new Map<string, number>();
+  for (const group of chunk(taskIds, ROUTE_STATE_CHUNK_SIZE)) {
+    const rows = await tx
+      .select({ id: probeTask.id, intervalSec: probeTask.intervalSec })
+      .from(probeTask)
+      .where(inArray(probeTask.id, group));
+    for (const r of rows) map.set(r.id, r.intervalSec);
+  }
+  return map;
 }

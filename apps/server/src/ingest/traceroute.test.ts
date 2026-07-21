@@ -254,6 +254,37 @@ async function seedAgentAndTask(db: DbClient, agentId: string, taskId: string) {
   });
 }
 
+async function seedAgentWithTasks(db: DbClient, agentId: string, taskIds: string[]) {
+  const nowMs = 1_700_000_000_000;
+  await db.insert(schema.agent).values({
+    id: agentId,
+    tokenHash: `hash-${agentId}`,
+    name: agentId,
+    isPublic: true,
+    displayOrder: 0,
+    tagsJson: "[]",
+    createdAtMs: nowMs,
+    updatedAtMs: nowMs,
+  });
+  // Chunk the seed insert so the fixture itself stays clear of
+  // SQLITE_MAX_VARIABLE_NUMBER for large pair counts.
+  for (let i = 0; i < taskIds.length; i += 200) {
+    const rows = taskIds.slice(i, i + 200).map((taskId) => ({
+      id: taskId,
+      name: taskId,
+      kind: "traceroute",
+      targetJson: JSON.stringify({ host: "example.com" }),
+      intervalSec: 60,
+      timeoutMs: 65_000,
+      enabled: true,
+      allAgents: true,
+      createdAtMs: nowMs,
+      updatedAtMs: nowMs,
+    }));
+    await db.insert(schema.probeTask).values(rows);
+  }
+}
+
 function resultArgs(
   agentId: string,
   taskId: string,
@@ -317,5 +348,64 @@ describe("ingestTracerouteResultsBatch (DB integration)", () => {
       error_code: "result_too_large",
     });
     expect(row!.routeObservationSignature).toBeNull();
+  });
+
+  test("ingests 1000+ unique pairs in one batch without tripping the expr-depth limit", async () => {
+    // Deliberately above SQLITE_MAX_EXPR_DEPTH (~999 OR terms) and spanning
+    // several ROUTE_STATE_CHUNK_SIZE (300) chunks. Before chunking, the flat
+    // `or(...)` in batchLoadRouteStates threw here and rolled back the whole
+    // shared ingest transaction.
+    const PAIR_COUNT = 1200;
+    const taskIds = Array.from({ length: PAIR_COUNT }, (_, i) => `t${i}`);
+    await seedAgentWithTasks(db, "a1", taskIds);
+
+    const batch = taskIds.map((taskId) => resultArgs("a1", taskId, v2Extra()));
+
+    await db.transaction((tx) => ingestTracerouteResultsBatch(tx, batch, ASN_LOOKUP));
+
+    const latest = await db.select().from(schema.probeResultLatest);
+    expect(latest.length).toBe(PAIR_COUNT);
+    const states = await db.select().from(schema.routeChangeState);
+    expect(states.length).toBe(PAIR_COUNT);
+  });
+
+  test("loads prior per-pair state across chunks so confirmations survive re-ingest", async () => {
+    const PAIR_COUNT = 1200;
+    const taskIds = Array.from({ length: PAIR_COUNT }, (_, i) => `t${i}`);
+    await seedAgentWithTasks(db, "a1", taskIds);
+
+    const t1 = 1_700_000_000_000;
+    const t2 = t1 + 60_000;
+
+    // First sighting: each pair holds a single-seen candidate, not yet stable.
+    await db.transaction((tx) =>
+      ingestTracerouteResultsBatch(
+        tx,
+        taskIds.map((taskId) => resultArgs("a1", taskId, v2Extra(), { ts: t1 })),
+        ASN_LOOKUP,
+      ),
+    );
+
+    // Second identical sighting at a later ts. The candidate only reaches
+    // confirmCount (and promotes to stable) if batchLoadRouteStates read the
+    // first-round state back across every chunk. If a chunk were missed, that
+    // pair would restart from empty and never leave the candidate stage.
+    await db.transaction((tx) =>
+      ingestTracerouteResultsBatch(
+        tx,
+        taskIds.map((taskId) => resultArgs("a1", taskId, v2Extra(), { ts: t2 })),
+        ASN_LOOKUP,
+      ),
+    );
+
+    const states = await db.select().from(schema.routeChangeState);
+    expect(states.length).toBe(PAIR_COUNT);
+    // Sample pairs drawn from distinct chunks (chunk size 300).
+    for (const taskId of ["t0", "t400", "t900", "t1199"]) {
+      const row = states.find((s) => s.taskId === taskId);
+      expect(row).toBeDefined();
+      expect(row!.stableSignature).toBe("749,4837");
+      expect(row!.candidateSignature).toBeNull();
+    }
   });
 });
