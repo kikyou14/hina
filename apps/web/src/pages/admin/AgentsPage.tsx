@@ -54,12 +54,15 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
+import { useMediaQuery } from "@/hooks/useMediaQuery";
 import { useAdminAgents } from "@/queries/adminAgents";
 import { invalidateAdminGroups } from "@/queries/adminGroups";
 import { AgentDeployDialog } from "./AgentDeployDialog";
 import { AgentIpList } from "./components/AgentIpList";
 import { CreateAgentForm } from "./components/CreateAgentForm";
 import { EditAgentForm } from "./components/EditAgentForm";
+
+const MD_QUERY = "(min-width: 768px)";
 
 function AgentDragHandle({
   activatorRef,
@@ -290,6 +293,7 @@ function SortableAgentRow({
 export function AgentsPage() {
   const { t } = useTranslation();
   useDocumentTitle(t("agents.title"));
+  const isDesktop = useMediaQuery(MD_QUERY);
   const queryClient = useQueryClient();
   const confirm = useConfirm();
 
@@ -380,17 +384,23 @@ export function AgentsPage() {
     });
   };
 
-  const tableBodyRef = React.useRef<HTMLTableSectionElement>(null);
-
-  const restrictToTableBody = React.useCallback<Modifier>(({ draggingNodeRect, transform }) => {
-    const container = tableBodyRef.current?.getBoundingClientRect();
-    if (!draggingNodeRect || !container) {
-      return { ...transform, x: 0 };
-    }
-    const minY = container.top - draggingNodeRect.top;
-    const maxY = container.bottom - draggingNodeRect.bottom;
-    return { ...transform, x: 0, y: Math.min(Math.max(transform.y, minY), maxY) };
+  const sortableContainerRef = React.useRef<HTMLElement | null>(null);
+  const setSortableContainerRef = React.useCallback((node: HTMLElement | null) => {
+    sortableContainerRef.current = node;
   }, []);
+
+  const restrictToSortableContainer = React.useCallback<Modifier>(
+    ({ draggingNodeRect, transform }) => {
+      const container = sortableContainerRef.current?.getBoundingClientRect();
+      if (!draggingNodeRect || !container) {
+        return { ...transform, x: 0 };
+      }
+      const minY = container.top - draggingNodeRect.top;
+      const maxY = container.bottom - draggingNodeRect.bottom;
+      return { ...transform, x: 0, y: Math.min(Math.max(transform.y, minY), maxY) };
+    },
+    [],
+  );
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
@@ -459,64 +469,64 @@ export function AgentsPage() {
           <DndContext
             sensors={sensors}
             collisionDetection={closestCenter}
-            modifiers={canDrag ? [restrictToTableBody] : undefined}
+            modifiers={canDrag ? [restrictToSortableContainer] : undefined}
             onDragEnd={handleDragEnd}
           >
             <SortableContext items={agents.map((a) => a.id)} strategy={verticalListSortingStrategy}>
-              {/* Mobile compact list */}
-              <div className="md:hidden">
-                {agents.map((a) => (
-                  <SortableAgentRowCompact
-                    key={a.id}
-                    agent={a}
-                    draggable={canDrag}
-                    onEdit={() => {
-                      setEditing(a);
-                      setEditOpen(true);
-                    }}
-                    onDeploy={() => {
-                      setDeployTarget({ agentId: a.id, agentName: a.name, token: null });
-                    }}
-                    onDelete={() => handleDeleteAgent(a.id)}
-                    deleteDisabled={deleteAgent.isPending}
-                  />
-                ))}
-              </div>
-
-              {/* Desktop table */}
-              <div className="hidden overflow-x-auto md:block">
-                <Table className="table-fixed">
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead className="w-8 px-1" />
-                      <TableHead>{t("agents.table.name")}</TableHead>
-                      <TableHead className="w-44">{t("agents.table.ip")}</TableHead>
-                      <TableHead>{t("agents.filters.tags")}</TableHead>
-                      <TableHead className="w-28">{t("agents.table.group")}</TableHead>
-                      <TableHead className="w-24">{t("agents.table.version")}</TableHead>
-                      <TableHead className="w-52">{t("agents.table.actions")}</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody ref={tableBodyRef}>
-                    {agents.map((a) => (
-                      <SortableAgentRow
-                        key={a.id}
-                        agent={a}
-                        draggable={canDrag}
-                        onEdit={() => {
-                          setEditing(a);
-                          setEditOpen(true);
-                        }}
-                        onDeploy={() => {
-                          setDeployTarget({ agentId: a.id, agentName: a.name, token: null });
-                        }}
-                        onDelete={() => handleDeleteAgent(a.id)}
-                        deleteDisabled={deleteAgent.isPending}
-                      />
-                    ))}
-                  </TableBody>
-                </Table>
-              </div>
+              {!isDesktop ? (
+                <div ref={setSortableContainerRef}>
+                  {agents.map((a) => (
+                    <SortableAgentRowCompact
+                      key={a.id}
+                      agent={a}
+                      draggable={canDrag}
+                      onEdit={() => {
+                        setEditing(a);
+                        setEditOpen(true);
+                      }}
+                      onDeploy={() => {
+                        setDeployTarget({ agentId: a.id, agentName: a.name, token: null });
+                      }}
+                      onDelete={() => handleDeleteAgent(a.id)}
+                      deleteDisabled={deleteAgent.isPending}
+                    />
+                  ))}
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <Table className="table-fixed">
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead className="w-8 px-1" />
+                        <TableHead>{t("agents.table.name")}</TableHead>
+                        <TableHead className="w-44">{t("agents.table.ip")}</TableHead>
+                        <TableHead>{t("agents.filters.tags")}</TableHead>
+                        <TableHead className="w-28">{t("agents.table.group")}</TableHead>
+                        <TableHead className="w-24">{t("agents.table.version")}</TableHead>
+                        <TableHead className="w-52">{t("agents.table.actions")}</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody ref={setSortableContainerRef}>
+                      {agents.map((a) => (
+                        <SortableAgentRow
+                          key={a.id}
+                          agent={a}
+                          draggable={canDrag}
+                          onEdit={() => {
+                            setEditing(a);
+                            setEditOpen(true);
+                          }}
+                          onDeploy={() => {
+                            setDeployTarget({ agentId: a.id, agentName: a.name, token: null });
+                          }}
+                          onDelete={() => handleDeleteAgent(a.id)}
+                          deleteDisabled={deleteAgent.isPending}
+                        />
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+              )}
             </SortableContext>
           </DndContext>
           <AdminPagination

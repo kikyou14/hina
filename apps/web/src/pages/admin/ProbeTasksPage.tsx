@@ -59,6 +59,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
+import { useMediaQuery } from "@/hooks/useMediaQuery";
 import { formatProbeTarget } from "@/lib/probes";
 import { useAdminAgentOptions } from "@/queries/adminAgents";
 import { invalidateAdminGroups, useAdminGroups } from "@/queries/adminGroups";
@@ -66,6 +67,8 @@ import { useAdminProbeTasks } from "@/queries/adminProbes";
 import { ProbeTaskForm } from "./components/ProbeTaskForm";
 import { SELECT_ALL_VALUE } from "./lib/probeValidation";
 import { ProbeTasksPageSkeleton } from "./ProbeTasksPage.skeleton";
+
+const MD_QUERY = "(min-width: 768px)";
 
 const PROBE_KIND_STYLES: Record<ProbeKind, string> = {
   icmp: "bg-blue-100 text-blue-700 dark:bg-blue-900/50 dark:text-blue-300",
@@ -290,6 +293,7 @@ function SortableProbeTaskRow({
 export function ProbeTasksPage() {
   const { t } = useTranslation();
   useDocumentTitle(t("probes.title"));
+  const isDesktop = useMediaQuery(MD_QUERY);
   const queryClient = useQueryClient();
   const confirm = useConfirm();
 
@@ -410,17 +414,23 @@ export function ProbeTasksPage() {
   const isTruncated = total > tasks.length;
   const canDrag = !hasFilters && !isTruncated;
 
-  const tableBodyRef = React.useRef<HTMLTableSectionElement>(null);
-
-  const restrictToTableBody = React.useCallback<Modifier>(({ draggingNodeRect, transform }) => {
-    const container = tableBodyRef.current?.getBoundingClientRect();
-    if (!draggingNodeRect || !container) {
-      return { ...transform, x: 0 };
-    }
-    const minY = container.top - draggingNodeRect.top;
-    const maxY = container.bottom - draggingNodeRect.bottom;
-    return { ...transform, x: 0, y: Math.min(Math.max(transform.y, minY), maxY) };
+  const sortableContainerRef = React.useRef<HTMLElement | null>(null);
+  const setSortableContainerRef = React.useCallback((node: HTMLElement | null) => {
+    sortableContainerRef.current = node;
   }, []);
+
+  const restrictToSortableContainer = React.useCallback<Modifier>(
+    ({ draggingNodeRect, transform }) => {
+      const container = sortableContainerRef.current?.getBoundingClientRect();
+      if (!draggingNodeRect || !container) {
+        return { ...transform, x: 0 };
+      }
+      const minY = container.top - draggingNodeRect.top;
+      const maxY = container.bottom - draggingNodeRect.bottom;
+      return { ...transform, x: 0, y: Math.min(Math.max(transform.y, minY), maxY) };
+    },
+    [],
+  );
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
@@ -526,60 +536,60 @@ export function ProbeTasksPage() {
             <DndContext
               sensors={sensors}
               collisionDetection={closestCenter}
-              modifiers={canDrag ? [restrictToTableBody] : undefined}
+              modifiers={canDrag ? [restrictToSortableContainer] : undefined}
               onDragEnd={handleDragEnd}
             >
               <SortableContext
                 items={tasks.map((t) => t.id)}
                 strategy={verticalListSortingStrategy}
               >
-                {/* Mobile compact list */}
-                <div className="md:hidden">
-                  {tasks.map((tsk) => (
-                    <SortableProbeTaskRowCompact
-                      key={tsk.id}
-                      task={tsk}
-                      draggable={canDrag}
-                      onEdit={() => {
-                        setEditing(tsk);
-                        setEditOpen(true);
-                      }}
-                      onDelete={() => handleDeleteTask(tsk.id)}
-                    />
-                  ))}
-                </div>
-
-                {/* Desktop table */}
-                <div className="hidden overflow-x-auto md:block">
-                  <Table className="table-fixed">
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead className="w-8 px-1" />
-                        <TableHead className="w-32">{t("probes.table.name")}</TableHead>
-                        <TableHead className="w-24">{t("probes.table.kind")}</TableHead>
-                        <TableHead className="w-48">{t("probes.table.target")}</TableHead>
-                        <TableHead className="w-16">{t("probes.table.interval")}</TableHead>
-                        <TableHead className="w-24">{t("probes.form.agents")}</TableHead>
-                        <TableHead className="w-20">{t("probes.table.status")}</TableHead>
-                        <TableHead className="w-28">{t("probes.table.actions")}</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody ref={tableBodyRef}>
-                      {tasks.map((tsk) => (
-                        <SortableProbeTaskRow
-                          key={tsk.id}
-                          task={tsk}
-                          draggable={canDrag}
-                          onEdit={() => {
-                            setEditing(tsk);
-                            setEditOpen(true);
-                          }}
-                          onDelete={() => handleDeleteTask(tsk.id)}
-                        />
-                      ))}
-                    </TableBody>
-                  </Table>
-                </div>
+                {!isDesktop ? (
+                  <div ref={setSortableContainerRef}>
+                    {tasks.map((tsk) => (
+                      <SortableProbeTaskRowCompact
+                        key={tsk.id}
+                        task={tsk}
+                        draggable={canDrag}
+                        onEdit={() => {
+                          setEditing(tsk);
+                          setEditOpen(true);
+                        }}
+                        onDelete={() => handleDeleteTask(tsk.id)}
+                      />
+                    ))}
+                  </div>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <Table className="table-fixed">
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead className="w-8 px-1" />
+                          <TableHead className="w-32">{t("probes.table.name")}</TableHead>
+                          <TableHead className="w-24">{t("probes.table.kind")}</TableHead>
+                          <TableHead className="w-48">{t("probes.table.target")}</TableHead>
+                          <TableHead className="w-16">{t("probes.table.interval")}</TableHead>
+                          <TableHead className="w-24">{t("probes.form.agents")}</TableHead>
+                          <TableHead className="w-20">{t("probes.table.status")}</TableHead>
+                          <TableHead className="w-28">{t("probes.table.actions")}</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody ref={setSortableContainerRef}>
+                        {tasks.map((tsk) => (
+                          <SortableProbeTaskRow
+                            key={tsk.id}
+                            task={tsk}
+                            draggable={canDrag}
+                            onEdit={() => {
+                              setEditing(tsk);
+                              setEditOpen(true);
+                            }}
+                            onDelete={() => handleDeleteTask(tsk.id)}
+                          />
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                )}
               </SortableContext>
             </DndContext>
           )}
