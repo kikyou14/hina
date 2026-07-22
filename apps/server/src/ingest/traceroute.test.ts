@@ -11,6 +11,7 @@ import {
   buildTracerouteResultExtraJson,
   enrichTracerouteAsn,
   ingestTracerouteResultsBatch,
+  prepareTracerouteResults,
 } from "./traceroute";
 import { TRACEROUTE_EXTRA_JSON_MAX_BYTES } from "./util";
 
@@ -318,9 +319,8 @@ describe("ingestTracerouteResultsBatch (DB integration)", () => {
   test("persists ASN-enriched v2 extra_json and a smaller-trace route signature", async () => {
     await seedAgentAndTask(db, "a1", "t1");
 
-    await db.transaction((tx) =>
-      ingestTracerouteResultsBatch(tx, [resultArgs("a1", "t1", v2Extra())], ASN_LOOKUP),
-    );
+    const prepared = prepareTracerouteResults([resultArgs("a1", "t1", v2Extra())], ASN_LOOKUP);
+    await db.transaction((tx) => ingestTracerouteResultsBatch(tx, prepared));
 
     const [row] = await db.select().from(schema.probeResultLatest);
     expect(row).toBeDefined();
@@ -334,9 +334,8 @@ describe("ingestTracerouteResultsBatch (DB integration)", () => {
     await seedAgentAndTask(db, "a1", "t1");
     const huge = v2Extra({ filler: "x".repeat(TRACEROUTE_EXTRA_JSON_MAX_BYTES + 1) });
 
-    await db.transaction((tx) =>
-      ingestTracerouteResultsBatch(tx, [resultArgs("a1", "t1", huge)], ASN_LOOKUP),
-    );
+    const prepared = prepareTracerouteResults([resultArgs("a1", "t1", huge)], ASN_LOOKUP);
+    await db.transaction((tx) => ingestTracerouteResultsBatch(tx, prepared));
 
     const [row] = await db.select().from(schema.probeResultLatest);
     expect(row?.extraJson).not.toBeNull();
@@ -361,7 +360,8 @@ describe("ingestTracerouteResultsBatch (DB integration)", () => {
 
     const batch = taskIds.map((taskId) => resultArgs("a1", taskId, v2Extra()));
 
-    await db.transaction((tx) => ingestTracerouteResultsBatch(tx, batch, ASN_LOOKUP));
+    const prepared = prepareTracerouteResults(batch, ASN_LOOKUP);
+    await db.transaction((tx) => ingestTracerouteResultsBatch(tx, prepared));
 
     const latest = await db.select().from(schema.probeResultLatest);
     expect(latest.length).toBe(PAIR_COUNT);
@@ -378,25 +378,21 @@ describe("ingestTracerouteResultsBatch (DB integration)", () => {
     const t2 = t1 + 60_000;
 
     // First sighting: each pair holds a single-seen candidate, not yet stable.
-    await db.transaction((tx) =>
-      ingestTracerouteResultsBatch(
-        tx,
-        taskIds.map((taskId) => resultArgs("a1", taskId, v2Extra(), { ts: t1 })),
-        ASN_LOOKUP,
-      ),
+    const firstRound = prepareTracerouteResults(
+      taskIds.map((taskId) => resultArgs("a1", taskId, v2Extra(), { ts: t1 })),
+      ASN_LOOKUP,
     );
+    await db.transaction((tx) => ingestTracerouteResultsBatch(tx, firstRound));
 
     // Second identical sighting at a later ts. The candidate only reaches
     // confirmCount (and promotes to stable) if batchLoadRouteStates read the
     // first-round state back across every chunk. If a chunk were missed, that
     // pair would restart from empty and never leave the candidate stage.
-    await db.transaction((tx) =>
-      ingestTracerouteResultsBatch(
-        tx,
-        taskIds.map((taskId) => resultArgs("a1", taskId, v2Extra(), { ts: t2 })),
-        ASN_LOOKUP,
-      ),
+    const secondRound = prepareTracerouteResults(
+      taskIds.map((taskId) => resultArgs("a1", taskId, v2Extra(), { ts: t2 })),
+      ASN_LOOKUP,
     );
+    await db.transaction((tx) => ingestTracerouteResultsBatch(tx, secondRound));
 
     const states = await db.select().from(schema.routeChangeState);
     expect(states.length).toBe(PAIR_COUNT);

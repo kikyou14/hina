@@ -121,4 +121,52 @@ describe("telemetry ingest split", () => {
     expect(status[0]?.online).toBe(true);
     expect(status[0]?.lastMetricsPack).toEqual(Buffer.from([0xff, 0xee]));
   });
+
+  test("ingestTelemetryTrafficAndRollup writes one row per tier and averages within a bucket", async () => {
+    await seedAgent(db, "a1");
+
+    const base = 1_700_000_000_000;
+
+    // Sample 1 seeds the trafficCounter baseline (delta=0) and opens each tier's
+    // bucket with cpu=20.
+    await db.transaction((tx) =>
+      ingestTelemetryTrafficAndRollup(
+        tx,
+        telemetryArgs("a1", {
+          seq: 1,
+          recvTsMs: base,
+          rxBytesTotal: 1000,
+          txBytesTotal: 2000,
+          numericMetrics: { "cpu.usage_pct": 20 },
+        }),
+      ),
+    );
+
+    await db.transaction((tx) =>
+      ingestTelemetryTrafficAndRollup(
+        tx,
+        telemetryArgs("a1", {
+          seq: 2,
+          recvTsMs: base,
+          rxBytesTotal: 1100,
+          txBytesTotal: 2100,
+          numericMetrics: { "cpu.usage_pct": 40 },
+        }),
+      ),
+    );
+
+    const rollups = await db.select().from(schema.metricRollup);
+    const intervals = [...new Set(rollups.map((r) => r.intervalSec))].sort((a, b) => a - b);
+    expect(intervals).toEqual([4, 60, 600, 3600]);
+    // Exactly one row per tier — the multi-row upsert must not duplicate tiers.
+    expect(rollups).toHaveLength(4);
+
+    for (const row of rollups) {
+      expect(row.samples).toBe(2);
+      expect(row.cpuPct).toBe(30);
+      expect(row.cpuSamples).toBe(2);
+      expect(row.rxBytesSum).toBe(100);
+      expect(row.txBytesSum).toBe(100);
+    }
+  });
 });

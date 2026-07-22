@@ -23,6 +23,7 @@ type AdminAgentDeltaMessage = {
   system?: {
     agentVersion: string | null;
   };
+  capabilitiesChanged?: boolean;
 };
 
 type AdminAgentGeoMessage = {
@@ -150,7 +151,7 @@ export function useAdminLiveSync() {
           ["admin", "agent", message.agentId],
           (current) => (current ? patchAdminAgent(current, message) : current),
         );
-        if (message.system) {
+        if (message.capabilitiesChanged) {
           queryClient.invalidateQueries({ queryKey: ["admin", "probeTasks"] });
         }
         return;

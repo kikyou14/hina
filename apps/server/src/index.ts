@@ -193,6 +193,11 @@ const server = Bun.serve<SocketData>({
       }
       wsHub.websocket.close(toAgentSocket(ws));
     },
+    drain(ws) {
+      if (ws.data.kind === "live") {
+        liveHub.websocket.drain(toLiveSocket(ws));
+      }
+    },
   },
 });
 

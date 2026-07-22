@@ -8,6 +8,55 @@ export type TrafficRate = {
   updatedAtMs: number;
 };
 
+export function computeCounterRate(
+  prev: { tsMs: number; rx: number; tx: number } | null,
+  next: { tsMs: number; rx: number; tx: number },
+): { rxRate: number | null; txRate: number | null } {
+  if (!prev) return { rxRate: null, txRate: null };
+  const elapsedSec = (next.tsMs - prev.tsMs) / 1000;
+  if (!Number.isFinite(elapsedSec) || elapsedSec <= 0) return { rxRate: null, txRate: null };
+  const dRx = next.rx - prev.rx;
+  const dTx = next.tx - prev.tx;
+  return {
+    rxRate: dRx >= 0 ? dRx / elapsedSec : null,
+    txRate: dTx >= 0 ? dTx / elapsedSec : null,
+  };
+}
+
+export function computeDeltaRate(
+  prevTsMs: number | null,
+  next: { tsMs: number; deltaRx: number; deltaTx: number },
+): { rxRate: number | null; txRate: number | null } {
+  if (prevTsMs === null) return { rxRate: null, txRate: null };
+  const elapsedSec = (next.tsMs - prevTsMs) / 1000;
+  if (!Number.isFinite(elapsedSec) || elapsedSec <= 0) return { rxRate: null, txRate: null };
+  return {
+    rxRate: next.deltaRx >= 0 ? next.deltaRx / elapsedSec : null,
+    txRate: next.deltaTx >= 0 ? next.deltaTx / elapsedSec : null,
+  };
+}
+
+// Picks the best available rate source: protocol v2 exposes absolute counters on
+// both samples (robust diff), while v1 only carries per-sample byte deltas.
+export function deriveTrafficRates(
+  prev: { tsMs: number; rx?: number; tx?: number } | null,
+  next: { tsMs: number; rx?: number; tx?: number; deltaRx: number; deltaTx: number },
+): { rxRate: number | null; txRate: number | null } {
+  if (
+    prev &&
+    typeof prev.rx === "number" &&
+    typeof prev.tx === "number" &&
+    typeof next.rx === "number" &&
+    typeof next.tx === "number"
+  ) {
+    return computeCounterRate(
+      { tsMs: prev.tsMs, rx: prev.rx, tx: prev.tx },
+      { tsMs: next.tsMs, rx: next.rx, tx: next.tx },
+    );
+  }
+  return computeDeltaRate(prev?.tsMs ?? null, next);
+}
+
 export type AgentSeriesPoint = {
   t: number;
   s: number;

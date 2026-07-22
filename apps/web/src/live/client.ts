@@ -2,17 +2,21 @@ import * as React from "react";
 
 export type LiveSocketStatus = "waiting" | "connected" | "reconnecting";
 
-function buildWebSocketUrl(path: string): string {
+function buildWebSocketUrl(path: string, protocolVersion?: number): string {
   const url = new URL(window.location.href);
   url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
   url.pathname = path;
   url.search = "";
   url.hash = "";
+  if (protocolVersion !== undefined) {
+    url.searchParams.set("v", String(protocolVersion));
+  }
   return url.toString();
 }
 
 export function useLiveSocket<T>(args: {
   path: string;
+  protocolVersion?: number;
   enabled?: boolean;
   reconnectKey?: string | number;
   onMessage: (message: T) => void;
@@ -48,7 +52,7 @@ export function useLiveSocket<T>(args: {
 
     const connect = () => {
       if (disposed) return;
-      const nextSocket = new WebSocket(buildWebSocketUrl(args.path));
+      const nextSocket = new WebSocket(buildWebSocketUrl(args.path, args.protocolVersion));
       socket = nextSocket;
 
       nextSocket.onopen = () => {
@@ -101,7 +105,7 @@ export function useLiveSocket<T>(args: {
         } catch {}
       }
     };
-  }, [args.path, enabled, reconnectKey]);
+  }, [args.path, args.protocolVersion, enabled, reconnectKey]);
 
   return { status };
 }

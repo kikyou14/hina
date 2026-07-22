@@ -9,6 +9,7 @@ import {
   LIVE_BUFFER_MAX_MS,
   LIVE_BUFFER_FLUSH_INTERVAL_MS,
   clampFinite,
+  deriveTrafficRates,
   metricsToChartPoint,
   rollupPointToChartPoint,
 } from "../lib/chartHelpers";
@@ -22,7 +23,7 @@ export function useLiveMetricBuffer(agentId: string) {
   const liveBufferFlushRef = React.useRef(0);
   const liveBufferFlushTimerRef = React.useRef<number | null>(null);
   const trafficRateRef = React.useRef<TrafficRate | null>(null);
-  const lastDeltaTsRef = React.useRef<number | null>(null);
+  const lastCounterRef = React.useRef<{ tsMs: number; rx?: number; tx?: number } | null>(null);
 
   const cancelLiveBufferFlush = React.useEffectEvent(() => {
     if (liveBufferFlushTimerRef.current === null) return;
@@ -62,7 +63,7 @@ export function useLiveMetricBuffer(agentId: string) {
     setLiveBuffer([]);
     liveBufferFlushRef.current = 0;
     trafficRateRef.current = null;
-    lastDeltaTsRef.current = null;
+    lastCounterRef.current = null;
   }, [agentId]);
 
   const prevLiveStatusRef = React.useRef<string | null>(null);
@@ -73,16 +74,11 @@ export function useLiveMetricBuffer(agentId: string) {
       let rxRate = clampFinite(message.metrics["net.rx_rate"]);
       let txRate = clampFinite(message.metrics["net.tx_rate"]);
       if (rxRate === null || txRate === null) {
-        const prevTs = lastDeltaTsRef.current;
-        if (prevTs !== null) {
-          const elapsed = (message.tsMs - prevTs) / 1000;
-          if (Number.isFinite(elapsed) && elapsed > 0) {
-            rxRate ??= message.deltaRx / elapsed;
-            txRate ??= message.deltaTx / elapsed;
-          }
-        }
+        const derived = deriveTrafficRates(lastCounterRef.current, message);
+        rxRate ??= derived.rxRate;
+        txRate ??= derived.txRate;
       }
-      lastDeltaTsRef.current = message.tsMs;
+      lastCounterRef.current = { tsMs: message.tsMs, rx: message.rx, tx: message.tx };
       if (rxRate !== null || txRate !== null) {
         trafficRateRef.current = { rxRate, txRate, updatedAtMs: message.tsMs };
       }
@@ -122,7 +118,7 @@ export function useLiveMetricBuffer(agentId: string) {
     setLiveBuffer([]);
     liveBufferFlushRef.current = 0;
     trafficRateRef.current = null;
-    lastDeltaTsRef.current = null;
+    lastCounterRef.current = null;
   }, [liveStatus]);
 
   React.useEffect(() => {

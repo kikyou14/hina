@@ -1,7 +1,12 @@
 import { describe, expect, test } from "bun:test";
 
 import type { PublicAgentSummary } from "../src/api/public";
-import { applyAgentOps, hasUpsert, type PendingAgentOp } from "../src/live/agentOps";
+import {
+  applyAgentOps,
+  hasUpsert,
+  type AgentLivePatch,
+  type PendingAgentOp,
+} from "../src/live/agentOps";
 
 function agent(id: string, name: string): PublicAgentSummary {
   return { id, name } as PublicAgentSummary;
@@ -9,6 +14,35 @@ function agent(id: string, name: string): PublicAgentSummary {
 
 function ops(entries: Array<[string, PendingAgentOp]>): Map<string, PendingAgentOp> {
   return new Map(entries);
+}
+
+function livePatch(): AgentLivePatch {
+  return {
+    tsMs: 200,
+    latest: {
+      seq: 2,
+      uptimeSec: 30,
+      rx: 100,
+      tx: 200,
+      m: { "cpu.usage_pct": 42 },
+    },
+    billing: {
+      quotaBytes: 1_000,
+      mode: "sum",
+      resetDay: 1,
+      periodStartDayYyyyMmDd: 20260701,
+      periodEndDayYyyyMmDd: 20260722,
+      rxBytes: 200,
+      txBytes: 300,
+      usedBytes: 500,
+      overQuota: false,
+    },
+    traffic: {
+      totalRxBytes: 1_000,
+      totalTxBytes: 2_000,
+      sinceDayYyyyMmDd: 20260701,
+    },
+  };
 }
 
 describe("applyAgentOps", () => {
@@ -74,6 +108,32 @@ describe("applyAgentOps", () => {
     applyAgentOps(list, ops([["b", { kind: "upsert", agent: agent("b", "Bravo") }]]));
     expect(list.map((a) => a.id)).toEqual(["a"]);
   });
+
+  test("patches status, telemetry, billing, and traffic without replacing metadata", () => {
+    const current = {
+      ...agent("a", "Alpha"),
+      status: { online: false, lastSeenAtMs: 100 },
+      latest: null,
+      billing: null,
+      traffic: null,
+    } as PublicAgentSummary;
+    const patch = livePatch();
+
+    const result = applyAgentOps([current], ops([["a", { kind: "patch", patch }]]));
+
+    expect(result[0]).toMatchObject({
+      id: "a",
+      name: "Alpha",
+      status: { online: true, lastSeenAtMs: patch.tsMs },
+      latest: patch.latest,
+      billing: patch.billing,
+      traffic: patch.traffic,
+    });
+    expect(current.status).toEqual({ online: false, lastSeenAtMs: 100 });
+    expect(current.latest).toBeNull();
+    expect(current.billing).toBeNull();
+    expect(current.traffic).toBeNull();
+  });
 });
 
 describe("hasUpsert", () => {
@@ -89,6 +149,10 @@ describe("hasUpsert", () => {
 
   test("is false for a remove-only batch", () => {
     expect(hasUpsert(ops([["a", { kind: "remove" }]]))).toBe(false);
+  });
+
+  test("is false for a patch-only batch", () => {
+    expect(hasUpsert(ops([["a", { kind: "patch", patch: livePatch() }]]))).toBe(false);
   });
 
   test("is false for an empty batch", () => {

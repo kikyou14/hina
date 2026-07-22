@@ -7,6 +7,7 @@ import type { TelemetryIngestArgs, TelemetryIngestResult } from "../ingest/telem
 import { createLogger } from "../logging/logger";
 import { uniqueStrings } from "../util/lang";
 import { checkRequestOrigin } from "../util/origin";
+import { Outbox, type OutboxSink } from "./outbox";
 
 const liveLog = createLogger("live");
 
@@ -28,15 +29,37 @@ function getCookieValue(header: string | null, key: string): string | null {
   return null;
 }
 
-function sendJson(ws: ServerWebSocket<BrowserLiveWsData>, payload: unknown) {
-  try {
-    ws.send(JSON.stringify(payload));
-  } catch {}
+const PROTOCOL_TELEMETRY_DELTA = 2;
+
+function parseLiveProtocolVersion(req: Request): number {
+  const raw = new URL(req.url).searchParams.get("v");
+  if (raw === null) return 1;
+  const parsed = Number.parseInt(raw, 10);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : 1;
 }
 
-function sendRaw(ws: ServerWebSocket<BrowserLiveWsData>, raw: string) {
+const outboxes = new WeakMap<ServerWebSocket<BrowserLiveWsData>, Outbox>();
+
+function outboxFor(ws: ServerWebSocket<BrowserLiveWsData>): Outbox {
+  let box = outboxes.get(ws);
+  if (!box) {
+    box = new Outbox();
+    outboxes.set(ws, box);
+  }
+  return box;
+}
+
+function sendRaw(ws: ServerWebSocket<BrowserLiveWsData>, raw: string, key: string) {
+  outboxFor(ws).push(ws as OutboxSink, raw, key);
+}
+
+function sendJson(ws: ServerWebSocket<BrowserLiveWsData>, payload: unknown, key: string) {
+  sendRaw(ws, JSON.stringify(payload), key);
+}
+
+function corked(ws: ServerWebSocket<BrowserLiveWsData>, fn: () => void) {
   try {
-    ws.send(raw);
+    ws.cork(fn);
   } catch {}
 }
 
@@ -45,6 +68,7 @@ export type BrowserLiveWsData = {
   scope: "public" | "privileged" | "admin";
   userId?: string;
   sessionTokenHash?: string;
+  protocol?: number;
 };
 
 type PublicLiveMessage =
@@ -56,9 +80,15 @@ type PublicLiveMessage =
       type: "event.public.telemetry_delta";
       agentId: string;
       tsMs: number;
+      seq: number;
+      uptimeSec: number | null;
+      rx: number;
+      tx: number;
       metrics: Record<string, number>;
       deltaRx: number;
       deltaTx: number;
+      billing: AgentPublicSummary["billing"];
+      traffic: AgentPublicSummary["traffic"];
     };
 
 type AdminLiveMessage =
@@ -81,6 +111,11 @@ type AdminLiveMessage =
       system?: {
         agentVersion: string | null;
       };
+      // Set only on a HELLO-derived delta: the agent (re)connected and re-reported
+      // its capabilities, so the client should re-scan probe-task applicability.
+      // Presence-only deltas (IP change, disconnect) omit this even though they
+      // still carry `system` as mergeable state.
+      capabilitiesChanged?: boolean;
     }
   | {
       type: "event.admin.agent_geo";
@@ -122,6 +157,7 @@ export type BrowserLiveHub = {
     open: (ws: ServerWebSocket<BrowserLiveWsData>) => void;
     message: (ws: ServerWebSocket<BrowserLiveWsData>, message: string | Uint8Array) => void;
     close: (ws: ServerWebSocket<BrowserLiveWsData>) => void;
+    drain: (ws: ServerWebSocket<BrowserLiveWsData>) => void;
   };
 
   publishAgentChanges: (agentIds: string[]) => void;
@@ -183,9 +219,12 @@ async function sendScopeSnapshot(
     if (!scope.clients.has(ws)) return;
     const agents = scope.onlyPublic ? registry.listPublicSummaries() : registry.listSummaries();
     scope.knownIdsMap.set(ws, new Set(agents.map((a) => a.id)));
-    sendJson(ws, { type: "snapshot.public.agents", agents } satisfies PublicLiveMessage);
+    sendJson(ws, { type: "snapshot.public.agents", agents } satisfies PublicLiveMessage, "snap");
   } catch (err) {
     liveLog.warn(`initial snapshot failed: scope=${ws.data.scope}`, err);
+    try {
+      ws.close(1011, "snapshot_failed");
+    } catch {}
   }
 }
 
@@ -194,6 +233,7 @@ function broadcastAgentChangesToScope(
   scope: PublicScopeConfig,
   uniqueIds: string[],
   nowMs: number,
+  clientFilter?: (ws: ServerWebSocket<BrowserLiveWsData>) => boolean,
 ) {
   if (scope.clients.size === 0 || uniqueIds.length === 0) return;
 
@@ -228,21 +268,36 @@ function broadcastAgentChangesToScope(
   }
 
   for (const ws of scope.clients) {
+    if (clientFilter && !clientFilter(ws)) continue;
     let knownIds = scope.knownIdsMap.get(ws);
     if (!knownIds) {
       knownIds = new Set();
       scope.knownIdsMap.set(ws, knownIds);
     }
-    for (const [id, raw] of upsertPayloads) {
-      sendRaw(ws, raw);
-      knownIds.add(id);
-    }
-    for (const id of hiddenIds) {
-      if (!knownIds.has(id)) continue;
-      sendRaw(ws, getRemovePayload(id));
-      knownIds.delete(id);
-    }
+    const known = knownIds;
+    corked(ws, () => {
+      for (const [id, raw] of upsertPayloads) {
+        sendRaw(ws, raw, `a:${id}`);
+        known.add(id);
+      }
+      for (const id of hiddenIds) {
+        if (!known.has(id)) continue;
+        sendRaw(ws, getRemovePayload(id), `a:${id}`);
+        known.delete(id);
+      }
+    });
   }
+}
+
+function isLegacyPublicClient(ws: ServerWebSocket<BrowserLiveWsData>): boolean {
+  return (ws.data.protocol ?? 1) < PROTOCOL_TELEMETRY_DELTA;
+}
+
+function scopeHasLegacyClient(scope: PublicScopeConfig): boolean {
+  for (const ws of scope.clients) {
+    if (isLegacyPublicClient(ws)) return true;
+  }
+  return false;
 }
 
 export function createBrowserLiveHub(deps: {
@@ -289,10 +344,14 @@ export function createBrowserLiveHub(deps: {
     }>,
   ) {
     if (adminClients.size === 0 || updates.length === 0) return;
-    const payloads: string[] = [];
+    const payloads: Array<{ key: string; raw: string }> = [];
     for (const update of updates) {
-      payloads.push(
-        JSON.stringify({
+      const fromHello = update.system !== undefined;
+      const agentVersion =
+        update.system?.agentVersion ?? deps.registry.getAgentVersion(update.agentId);
+      payloads.push({
+        key: `ad:presence:${update.agentId}`,
+        raw: JSON.stringify({
           type: "event.admin.agent_delta",
           agentId: update.agentId,
           status: {
@@ -301,12 +360,15 @@ export function createBrowserLiveHub(deps: {
             lastIpV4: update.lastIpV4,
             lastIpV6: update.lastIpV6,
           },
-          ...(update.system ? { system: update.system } : {}),
+          system: { agentVersion },
+          ...(fromHello ? { capabilitiesChanged: true } : {}),
         } satisfies AdminLiveMessage),
-      );
+      });
     }
     for (const ws of adminClients) {
-      for (const raw of payloads) sendRaw(ws, raw);
+      corked(ws, () => {
+        for (const { key, raw } of payloads) sendRaw(ws, raw, key);
+      });
     }
   }
 
@@ -316,10 +378,11 @@ export function createBrowserLiveHub(deps: {
     if (adminClients.size === 0 || batch.length === 0) return;
 
     const latestByAgentId = deduplicateByLatest(batch);
-    const payloads: string[] = [];
+    const payloads: Array<{ key: string; raw: string }> = [];
     for (const entry of latestByAgentId.values()) {
-      payloads.push(
-        JSON.stringify({
+      payloads.push({
+        key: `ad:tele:${entry.args.agentId}`,
+        raw: JSON.stringify({
           type: "event.admin.agent_delta",
           agentId: entry.args.agentId,
           status: {
@@ -333,10 +396,12 @@ export function createBrowserLiveHub(deps: {
             m: entry.result.numericMetrics,
           },
         } satisfies AdminLiveMessage),
-      );
+      });
     }
     for (const ws of adminClients) {
-      for (const raw of payloads) sendRaw(ws, raw);
+      corked(ws, () => {
+        for (const { key, raw } of payloads) sendRaw(ws, raw, key);
+      });
     }
   }
 
@@ -356,10 +421,11 @@ export function createBrowserLiveHub(deps: {
       }
     }
 
-    const payloads: string[] = [];
+    const payloads: Array<{ key: string; raw: string }> = [];
     for (const entry of latestByPair.values()) {
-      payloads.push(
-        JSON.stringify({
+      payloads.push({
+        key: `p:${entry.agentId}:${entry.result.tid}`,
+        raw: JSON.stringify({
           type: "event.admin.probe_latest",
           agentId: entry.agentId,
           taskId: entry.result.tid,
@@ -376,11 +442,13 @@ export function createBrowserLiveHub(deps: {
             updatedAtMs: entry.recvTsMs,
           },
         } satisfies AdminLiveMessage),
-      );
+      });
     }
 
     for (const ws of adminClients) {
-      for (const raw of payloads) sendRaw(ws, raw);
+      corked(ws, () => {
+        for (const { key, raw } of payloads) sendRaw(ws, raw, key);
+      });
     }
   }
 
@@ -392,32 +460,72 @@ export function createBrowserLiveHub(deps: {
     broadcastAgentChangesToScope(deps.registry, privilegedScope, uniqueIds, nowMs);
   }
 
+  function broadcastLegacyTelemetryUpsert(
+    batch: Array<{ args: TelemetryIngestArgs; result: TelemetryIngestResult }>,
+  ) {
+    const publicLegacy = scopeHasLegacyClient(publicScope);
+    const privilegedLegacy = scopeHasLegacyClient(privilegedScope);
+    if (!publicLegacy && !privilegedLegacy) return;
+    const agentIds = uniqueStrings(batch.map((entry) => entry.args.agentId));
+    if (agentIds.length === 0) return;
+    const nowMs = Date.now();
+    if (publicLegacy) {
+      broadcastAgentChangesToScope(
+        deps.registry,
+        publicScope,
+        agentIds,
+        nowMs,
+        isLegacyPublicClient,
+      );
+    }
+    if (privilegedLegacy) {
+      broadcastAgentChangesToScope(
+        deps.registry,
+        privilegedScope,
+        agentIds,
+        nowMs,
+        isLegacyPublicClient,
+      );
+    }
+  }
+
   function broadcastTelemetryDeltasToScope(
     latestByAgentId: Map<string, { args: TelemetryIngestArgs; result: TelemetryIngestResult }>,
     scope: PublicScopeConfig,
   ) {
     if (scope.clients.size === 0 || latestByAgentId.size === 0) return;
     const rawByAgentId = new Map<string, string>();
+    const nowMs = Date.now();
     for (const entry of latestByAgentId.values()) {
+      const summary = deps.registry.getSummary(entry.args.agentId, nowMs);
+      if (!summary || (scope.onlyPublic && !summary.isPublic)) continue;
       rawByAgentId.set(
         entry.args.agentId,
         JSON.stringify({
           type: "event.public.telemetry_delta",
           agentId: entry.args.agentId,
           tsMs: entry.args.recvTsMs,
+          seq: entry.args.seq,
+          uptimeSec: entry.args.uptimeSec,
+          rx: entry.args.rxBytesTotal,
+          tx: entry.args.txBytesTotal,
           metrics: entry.result.numericMetrics,
           deltaRx: entry.result.deltaRx,
           deltaTx: entry.result.deltaTx,
+          billing: summary.billing,
+          traffic: summary.traffic,
         } satisfies PublicLiveMessage),
       );
     }
     for (const ws of scope.clients) {
       const knownIds = scope.knownIdsMap.get(ws);
       if (!knownIds) continue;
-      for (const [agentId, raw] of rawByAgentId) {
-        if (!knownIds.has(agentId)) continue;
-        sendRaw(ws, raw);
-      }
+      corked(ws, () => {
+        for (const [agentId, raw] of rawByAgentId) {
+          if (!knownIds.has(agentId)) continue;
+          sendRaw(ws, raw, `t:${agentId}`);
+        }
+      });
     }
   }
 
@@ -437,9 +545,16 @@ export function createBrowserLiveHub(deps: {
     const blocked = guardOrigin(req, server.requestIP(req)?.address, "/live/public");
     if (blocked) return blocked;
     const user = await resolveAdminUser(req);
+    const protocol = parseLiveProtocolVersion(req);
     const data: BrowserLiveWsData = user
-      ? { kind: "live", scope: "privileged", userId: user.id, sessionTokenHash: user.tokenHash }
-      : { kind: "live", scope: "public" };
+      ? {
+          kind: "live",
+          scope: "privileged",
+          userId: user.id,
+          sessionTokenHash: user.tokenHash,
+          protocol,
+        }
+      : { kind: "live", scope: "public", protocol };
     const ok = server.upgrade(req, { data });
     if (!ok) return new Response("Upgrade required", { status: 426 });
     return undefined;
@@ -466,25 +581,34 @@ export function createBrowserLiveHub(deps: {
     open(ws) {
       if (ws.data.scope === "public") {
         publicClients.add(ws);
-        sendJson(ws, { type: "hello.public", tsMs: Date.now() } satisfies PublicLiveMessage);
+        sendJson(
+          ws,
+          { type: "hello.public", tsMs: Date.now() } satisfies PublicLiveMessage,
+          "hello",
+        );
         void sendScopeSnapshot(deps.registry, ws, publicScope);
         return;
       }
 
       if (ws.data.scope === "privileged") {
         privilegedClients.add(ws);
-        sendJson(ws, { type: "hello.public", tsMs: Date.now() } satisfies PublicLiveMessage);
+        sendJson(
+          ws,
+          { type: "hello.public", tsMs: Date.now() } satisfies PublicLiveMessage,
+          "hello",
+        );
         void sendScopeSnapshot(deps.registry, ws, privilegedScope);
         return;
       }
 
       adminClients.add(ws);
-      sendJson(ws, { type: "hello.admin", tsMs: Date.now() } satisfies AdminLiveMessage);
+      sendJson(ws, { type: "hello.admin", tsMs: Date.now() } satisfies AdminLiveMessage, "hello");
     },
 
     message(_ws, _message) {},
 
     close(ws) {
+      outboxes.delete(ws);
       if (ws.data.scope === "public") {
         publicClients.delete(ws);
         return;
@@ -494,6 +618,10 @@ export function createBrowserLiveHub(deps: {
         return;
       }
       adminClients.delete(ws);
+    },
+
+    drain(ws) {
+      outboxes.get(ws)?.drain(ws as OutboxSink);
     },
   };
 
@@ -546,18 +674,17 @@ export function createBrowserLiveHub(deps: {
         agentId,
         geo,
       } satisfies AdminLiveMessage);
+      const key = `g:${agentId}`;
       for (const ws of adminClients) {
-        sendRaw(ws, raw);
+        sendRaw(ws, raw, key);
       }
     },
     publishTelemetryBatch(batch) {
       if (batch.length === 0) return;
-      const agentIds = uniqueStrings(batch.map((entry) => entry.args.agentId));
-      broadcastAgentChanges(agentIds);
-
       const latestByAgentId = deduplicateByLatest(batch);
       broadcastTelemetryDeltasToScope(latestByAgentId, publicScope);
       broadcastTelemetryDeltasToScope(latestByAgentId, privilegedScope);
+      broadcastLegacyTelemetryUpsert(batch);
       publishAdminTelemetryDeltas(batch);
     },
     publishAgentPresence(updates) {

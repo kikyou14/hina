@@ -8,7 +8,11 @@ import {
   type TelemetryIngestResult,
   upsertAgentStatusFromTelemetry,
 } from "../ingest/telemetry";
-import { ingestTracerouteResultsBatch, type RouteChangeEvent } from "../ingest/traceroute";
+import {
+  ingestTracerouteResultsBatch,
+  prepareTracerouteResults,
+  type RouteChangeEvent,
+} from "../ingest/traceroute";
 import type { BrowserLiveHub } from "../live/hub";
 
 export type BufferedProbeResult = {
@@ -173,6 +177,16 @@ export class FlushBuffer {
     let txCommitted = false;
 
     try {
+      const normalBatch: ProbeResultIngestArgs[] = [];
+      const traceBatch: ProbeResultIngestArgs[] = [];
+      for (const entry of probeBatch) {
+        if (!this.deps.isAgentConnected(entry.args.agentId)) continue;
+        if (entry.isTraceroute) traceBatch.push(entry.args);
+        else normalBatch.push(entry.args);
+      }
+      allowedProbeArgs = [...normalBatch, ...traceBatch];
+      const preparedTrace = prepareTracerouteResults(traceBatch, this.deps.asnLookup);
+
       await this.deps.db.transaction(async (tx) => {
         for (const args of telemetryBatch) {
           if (!this.deps.registry.has(args.agentId)) continue;
@@ -190,17 +204,8 @@ export class FlushBuffer {
           }
         }
 
-        const normalBatch: ProbeResultIngestArgs[] = [];
-        const traceBatch: ProbeResultIngestArgs[] = [];
-        for (const entry of probeBatch) {
-          if (!this.deps.isAgentConnected(entry.args.agentId)) continue;
-          if (entry.isTraceroute) traceBatch.push(entry.args);
-          else normalBatch.push(entry.args);
-        }
-        allowedProbeArgs = [...normalBatch, ...traceBatch];
-
         await ingestProbeResultsBatch(tx, normalBatch);
-        routeChanges = await ingestTracerouteResultsBatch(tx, traceBatch, this.deps.asnLookup);
+        routeChanges = await ingestTracerouteResultsBatch(tx, preparedTrace);
       });
       txCommitted = true;
 

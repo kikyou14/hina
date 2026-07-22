@@ -811,6 +811,10 @@ export class AgentRegistry {
     return { ...this.toAdminSummary(entry, nowMs), inventory: entry.inventory };
   }
 
+  getAgentVersion(agentId: string): string | null {
+    return this.entries.get(agentId)?.lastAgentVersion ?? null;
+  }
+
   private compareById(aId: string, bId: string): number {
     const a = this.entries.get(aId);
     const b = this.entries.get(bId);

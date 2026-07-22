@@ -1,8 +1,33 @@
-import type { PublicAgentSummary } from "@/api/public";
+import type { PublicAgentSummary, PublicTelemetry } from "@/api/public";
+
+export type AgentLivePatch = {
+  readonly tsMs: number;
+  readonly latest: PublicTelemetry;
+  readonly billing: PublicAgentSummary["billing"];
+  readonly traffic: PublicAgentSummary["traffic"];
+};
 
 export type PendingAgentOp =
   | { readonly kind: "upsert"; readonly agent: PublicAgentSummary }
+  | { readonly kind: "patch"; readonly patch: AgentLivePatch }
   | { readonly kind: "remove" };
+
+type LivePatchable = {
+  status: PublicAgentSummary["status"];
+  latest: PublicAgentSummary["latest"];
+  billing: PublicAgentSummary["billing"];
+  traffic: PublicAgentSummary["traffic"];
+};
+
+export function applyLivePatch<T extends LivePatchable>(agent: T, patch: AgentLivePatch): T {
+  return {
+    ...agent,
+    status: { ...agent.status, online: true, lastSeenAtMs: patch.tsMs },
+    latest: patch.latest,
+    billing: patch.billing,
+    traffic: patch.traffic,
+  };
+}
 
 export function applyAgentOps(
   list: readonly PublicAgentSummary[],
@@ -20,6 +45,10 @@ export function applyAgentOps(
       continue;
     }
     const index = indexById.get(id);
+    if (op.kind === "patch") {
+      if (index !== undefined) next[index] = applyLivePatch(next[index]!, op.patch);
+      continue;
+    }
     if (index === undefined) {
       next.push(op.agent);
     } else {

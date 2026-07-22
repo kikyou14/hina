@@ -14,6 +14,7 @@ import {
   extractRouteObservation,
   type HopLike,
   type ResponseLike,
+  type RouteObservation,
   type TraceLike,
   type TracerouteLike,
 } from "./traceroute-route";
@@ -139,11 +140,25 @@ function chunk<T>(items: readonly T[], size: number): T[][] {
   return out;
 }
 
-export async function ingestTracerouteResultsBatch(
-  tx: DbTx,
+export type PreparedTracerouteResult = {
+  agentId: string;
+  taskId: string;
+  tsMs: number;
+  recvTsMs: number;
+  ok: boolean;
+  latMs: number | null;
+  code: number | null;
+  err: string | null;
+  extraJson: string | null;
+  lossPct: number | null;
+  jitterMs: number | null;
+  observation: RouteObservation | null;
+};
+
+export function prepareTracerouteResults(
   batch: ProbeResultIngestArgs[],
   asnLookup: AsnLookup | null,
-): Promise<RouteChangeEvent[]> {
+): PreparedTracerouteResult[] {
   if (batch.length === 0) return [];
 
   const latestByKey = new Map<string, ProbeResultIngestArgs>();
@@ -155,43 +170,62 @@ export async function ingestTracerouteResultsBatch(
     }
   }
 
-  const taskIds = [...new Set([...latestByKey.values()].map((a) => a.result.tid))];
+  const prepared: PreparedTracerouteResult[] = [];
+  for (const args of latestByKey.values()) {
+    const r = args.result;
+    const extraJson = buildTracerouteResultExtraJson(r.x, asnLookup);
+    prepared.push({
+      agentId: args.agentId,
+      taskId: r.tid,
+      tsMs: r.ts,
+      recvTsMs: args.recvTsMs,
+      ok: r.ok,
+      latMs: r.lat_ms ?? null,
+      code: r.code ?? null,
+      err: clampText(r.err, 4096),
+      extraJson,
+      lossPct: r.loss ?? null,
+      jitterMs: r.jit_ms ?? null,
+      observation: extractRouteObservation(extraJson),
+    });
+  }
+  return prepared;
+}
+
+export async function ingestTracerouteResultsBatch(
+  tx: DbTx,
+  prepared: PreparedTracerouteResult[],
+): Promise<RouteChangeEvent[]> {
+  if (prepared.length === 0) return [];
+
+  const taskIds = [...new Set(prepared.map((p) => p.taskId))];
   const taskIntervalMap = await loadTaskIntervals(tx, taskIds);
 
-  const stateKeys = [...latestByKey.values()].map((a) => ({
-    agentId: a.agentId,
-    taskId: a.result.tid,
-  }));
+  const stateKeys = prepared.map((p) => ({ agentId: p.agentId, taskId: p.taskId }));
   const stateMap = await batchLoadRouteStates(tx, stateKeys);
 
   const changes: RouteChangeEvent[] = [];
   const stateUpdates: Array<{ agentId: string; taskId: string; state: RouteState; nowMs: number }> =
     [];
 
-  for (const args of latestByKey.values()) {
-    const r = args.result;
-    const nowMs = args.recvTsMs;
-    const err = clampText(r.err, 4096);
-    const extraJson = buildTracerouteResultExtraJson(r.x, asnLookup);
-
-    const observation = extractRouteObservation(extraJson);
-    const signature = observation?.signature ?? null;
+  for (const p of prepared) {
+    const nowMs = p.recvTsMs;
 
     await tx
       .insert(probeResultLatest)
       .values({
-        agentId: args.agentId,
-        taskId: r.tid,
-        tsMs: r.ts,
+        agentId: p.agentId,
+        taskId: p.taskId,
+        tsMs: p.tsMs,
         recvTsMs: nowMs,
-        ok: r.ok,
-        latMs: r.lat_ms ?? null,
-        code: r.code ?? null,
-        err,
-        extraJson,
-        lossPct: r.loss ?? null,
-        jitterMs: r.jit_ms ?? null,
-        routeObservationSignature: signature,
+        ok: p.ok,
+        latMs: p.latMs,
+        code: p.code,
+        err: p.err,
+        extraJson: p.extraJson,
+        lossPct: p.lossPct,
+        jitterMs: p.jitterMs,
+        routeObservationSignature: p.observation?.signature ?? null,
         updatedAtMs: nowMs,
       })
       .onConflictDoUpdate({
@@ -212,24 +246,25 @@ export async function ingestTracerouteResultsBatch(
         setWhere: sql`excluded.ts_ms >= ${probeResultLatest.tsMs}`,
       });
 
+    const observation = p.observation;
     if (!observation) continue;
 
-    const stateKey = `${args.agentId}\0${r.tid}`;
+    const stateKey = `${p.agentId}\0${p.taskId}`;
     const prevState = stateMap.get(stateKey) ?? emptyRouteState();
-    const policy = buildRouteChangePolicy(taskIntervalMap.get(r.tid) ?? null);
+    const policy = buildRouteChangePolicy(taskIntervalMap.get(p.taskId) ?? null);
 
     const result = advanceRouteChangeState(
       prevState,
-      { signature: observation.signature, quality: observation.quality, tsMs: r.ts },
+      { signature: observation.signature, quality: observation.quality, tsMs: p.tsMs },
       policy,
     );
 
-    stateUpdates.push({ agentId: args.agentId, taskId: r.tid, state: result.state, nowMs });
+    stateUpdates.push({ agentId: p.agentId, taskId: p.taskId, state: result.state, nowMs });
 
     if (result.emit) {
       changes.push({
-        agentId: args.agentId,
-        taskId: r.tid,
+        agentId: p.agentId,
+        taskId: p.taskId,
         signature: result.emit.signature,
         prevSignature: result.emit.prevSignature,
       });

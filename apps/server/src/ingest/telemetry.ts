@@ -201,8 +201,7 @@ async function applyTrafficDelta(
   return { deltaRx, deltaTx, trafficDayYyyyMmDd: day };
 }
 
-async function upsertRollupBucket(
-  tx: DbTx,
+function buildRollupRow(
   args: TelemetryIngestArgs,
   intervalSec: number,
   rollupMetrics: RollupMetricValues,
@@ -210,30 +209,46 @@ async function upsertRollupBucket(
   deltaTx: number,
 ) {
   const bucketStartMs = Math.floor(args.recvTsMs / (intervalSec * 1000)) * intervalSec * 1000;
+  return {
+    agentId: args.agentId,
+    intervalSec,
+    bucketStartMs,
+    samples: 1,
+    cpuPct: rollupMetrics.cpuPct,
+    cpuSamples: initialFieldSamples(rollupMetrics.cpuPct),
+    memUsedPct: rollupMetrics.memUsedPct,
+    memUsedSamples: initialFieldSamples(rollupMetrics.memUsedPct),
+    diskUsedPct: rollupMetrics.diskUsedPct,
+    diskUsedSamples: initialFieldSamples(rollupMetrics.diskUsedPct),
+    procCount: rollupMetrics.procCount,
+    procCountSamples: initialFieldSamples(rollupMetrics.procCount),
+    connTcp: rollupMetrics.connTcp,
+    connTcpSamples: initialFieldSamples(rollupMetrics.connTcp),
+    connUdp: rollupMetrics.connUdp,
+    connUdpSamples: initialFieldSamples(rollupMetrics.connUdp),
+    rxBytesSum: deltaRx,
+    txBytesSum: deltaTx,
+    createdAtMs: args.recvTsMs,
+  };
+}
+
+async function upsertRollupBuckets(
+  tx: DbTx,
+  args: TelemetryIngestArgs,
+  intervalsSec: number[],
+  rollupMetrics: RollupMetricValues,
+  deltaRx: number,
+  deltaTx: number,
+) {
+  if (intervalsSec.length === 0) return;
+
+  const rows = intervalsSec.map((intervalSec) =>
+    buildRollupRow(args, intervalSec, rollupMetrics, deltaRx, deltaTx),
+  );
 
   await tx
     .insert(metricRollup)
-    .values({
-      agentId: args.agentId,
-      intervalSec,
-      bucketStartMs,
-      samples: 1,
-      cpuPct: rollupMetrics.cpuPct,
-      cpuSamples: initialFieldSamples(rollupMetrics.cpuPct),
-      memUsedPct: rollupMetrics.memUsedPct,
-      memUsedSamples: initialFieldSamples(rollupMetrics.memUsedPct),
-      diskUsedPct: rollupMetrics.diskUsedPct,
-      diskUsedSamples: initialFieldSamples(rollupMetrics.diskUsedPct),
-      procCount: rollupMetrics.procCount,
-      procCountSamples: initialFieldSamples(rollupMetrics.procCount),
-      connTcp: rollupMetrics.connTcp,
-      connTcpSamples: initialFieldSamples(rollupMetrics.connTcp),
-      connUdp: rollupMetrics.connUdp,
-      connUdpSamples: initialFieldSamples(rollupMetrics.connUdp),
-      rxBytesSum: deltaRx,
-      txBytesSum: deltaTx,
-      createdAtMs: args.recvTsMs,
-    })
+    .values(rows)
     .onConflictDoUpdate({
       target: [metricRollup.agentId, metricRollup.intervalSec, metricRollup.bucketStartMs],
       set: {
@@ -289,9 +304,7 @@ export async function ingestTelemetryTrafficAndRollup(
 
   const { deltaRx, deltaTx, trafficDayYyyyMmDd } = await applyTrafficDelta(tx, args);
 
-  for (const intervalSec of listTelemetryIntervalsSec()) {
-    await upsertRollupBucket(tx, args, intervalSec, rollupMetrics, deltaRx, deltaTx);
-  }
+  await upsertRollupBuckets(tx, args, listTelemetryIntervalsSec(), rollupMetrics, deltaRx, deltaTx);
 
   return {
     numericMetrics,

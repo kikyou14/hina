@@ -3,24 +3,19 @@ import * as React from "react";
 
 import type { PublicAgentDetailResponse, PublicAgentSummary } from "@/api/public";
 import { useOptionalAdminMe } from "@/queries/admin";
-import { applyAgentOps, hasUpsert, type PendingAgentOp } from "./agentOps";
+import {
+  applyAgentOps,
+  applyLivePatch,
+  hasUpsert,
+  type AgentLivePatch,
+  type PendingAgentOp,
+} from "./agentOps";
 import { useLiveSocket } from "./client";
-
-type PublicLiveMessage =
-  | { type: "hello.public"; tsMs: number }
-  | { type: "snapshot.public.agents"; agents: PublicAgentSummary[] }
-  | { type: "event.public.agent_upsert"; agent: PublicAgentSummary }
-  | { type: "event.public.agent_remove"; agentId: string }
-  | {
-      type: "event.public.telemetry_delta";
-      agentId: string;
-      tsMs: number;
-      metrics: Record<string, number>;
-      deltaRx: number;
-      deltaTx: number;
-    };
+import { isPublicTelemetryDeltaV2, type PublicLiveMessage } from "./publicMessages";
 
 const LIST_FLUSH_INTERVAL_MS = 500;
+
+const PUBLIC_LIVE_PROTOCOL = 2;
 
 export function usePublicLiveSync(args?: {
   agentId?: string;
@@ -32,6 +27,8 @@ export function usePublicLiveSync(args?: {
     metrics: Record<string, number>;
     deltaRx: number;
     deltaTx: number;
+    rx?: number;
+    tx?: number;
   }) => void;
 }) {
   const queryClient = useQueryClient();
@@ -50,6 +47,8 @@ export function usePublicLiveSync(args?: {
       metrics: Record<string, number>;
       deltaRx: number;
       deltaTx: number;
+      rx?: number;
+      tx?: number;
     }) => {
       args?.onTelemetryDelta?.(message);
     },
@@ -93,6 +92,7 @@ export function usePublicLiveSync(args?: {
 
   const { status } = useLiveSocket<PublicLiveMessage>({
     path: "/live/public",
+    protocolVersion: PUBLIC_LIVE_PROTOCOL,
     enabled: authSettled,
     reconnectKey,
     onReconnect() {
@@ -174,8 +174,51 @@ export function usePublicLiveSync(args?: {
       }
 
       if (message.type === "event.public.telemetry_delta") {
+        const v2 = isPublicTelemetryDeltaV2(message) ? message : null;
+        if (v2) {
+          const patch: AgentLivePatch = {
+            tsMs: v2.tsMs,
+            latest: {
+              seq: v2.seq,
+              uptimeSec: v2.uptimeSec,
+              rx: v2.rx,
+              tx: v2.tx,
+              m: v2.metrics,
+            },
+            billing: v2.billing,
+            traffic: v2.traffic,
+          };
+
+          const ops = pendingAgentOpsRef.current;
+          const existing = ops.get(v2.agentId);
+          if (existing?.kind === "upsert") {
+            ops.set(v2.agentId, {
+              kind: "upsert",
+              agent: applyLivePatch(existing.agent, patch),
+            });
+          } else if (existing?.kind !== "remove") {
+            ops.set(v2.agentId, { kind: "patch", patch });
+          }
+          scheduleAgentFlush();
+
+          if (args?.agentId && args.agentId === v2.agentId) {
+            queryClient.setQueryData<PublicAgentDetailResponse | undefined>(
+              ["public", "agent", args.agentId],
+              (current) => (current ? applyLivePatch(current, patch) : current),
+            );
+          }
+        }
+
         if (args?.agentId && args.agentId === message.agentId) {
-          onTelemetryDelta(message);
+          onTelemetryDelta({
+            agentId: message.agentId,
+            tsMs: message.tsMs,
+            metrics: message.metrics,
+            deltaRx: message.deltaRx,
+            deltaTx: message.deltaTx,
+            rx: v2?.rx,
+            tx: v2?.tx,
+          });
         }
         return;
       }
