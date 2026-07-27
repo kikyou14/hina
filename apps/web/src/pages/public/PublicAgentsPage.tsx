@@ -23,8 +23,6 @@ import { PublicAgentCardsVirtualGrid, PublicAgentListVirtualView } from "./Virtu
 
 preloadAgentPageChunk();
 
-const SCROLL_STORAGE_KEY = "hina.public.agents.scrollY";
-
 export function PublicAgentsPage() {
   const { t } = useTranslation();
   const { sortOfflineLast } = useSiteConfig();
@@ -49,24 +47,6 @@ export function PublicAgentsPage() {
 
   const viewLayoutId = React.useId();
   const [q, setQ] = React.useState("");
-
-  // Persist scroll position across SPA navigation. Save on unmount, restore
-  // once the list data is available (React Query cache is warm on return).
-  const scrollRestoredRef = React.useRef(false);
-  React.useLayoutEffect(() => {
-    if (scrollRestoredRef.current) return;
-    if (!agents.data) return;
-    scrollRestoredRef.current = true;
-    const saved = sessionStorage.getItem(SCROLL_STORAGE_KEY);
-    if (saved === null) return;
-    const y = Number.parseInt(saved, 10);
-    if (Number.isFinite(y)) window.scrollTo(0, y);
-  }, [agents.data]);
-  React.useEffect(() => {
-    return () => {
-      sessionStorage.setItem(SCROLL_STORAGE_KEY, String(window.scrollY));
-    };
-  }, []);
 
   const filtered = React.useMemo(() => {
     const list = agents.data?.agents ?? [];
