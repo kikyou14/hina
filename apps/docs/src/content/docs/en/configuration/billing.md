@@ -50,7 +50,7 @@ When the expiry time is empty, the agent is not considered expiring. The `lifeti
 
 The server checks expired non-`lifetime` agents once per hour and advances their expiry time into the future according to their billing cycle.
 
-Automatic renewal only applies to agents that reported data within the last **72 hours**. Long-offline agents are not auto-renewed until they report again and re-enter the check window.
+Automatic renewal only applies to agents the server records as **online**, with the online status checked again when updating the expiry time. Offline agents are not renewed even if they recently reported data; after reconnecting, they are renewed at the next check.
 
 When advancing by months, if the target month does not contain the original day, the result is clamped to the last day of the target month. For example, renewing January 31 by one month lands on the last day of February.
 

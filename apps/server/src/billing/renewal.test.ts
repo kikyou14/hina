@@ -1,5 +1,6 @@
 import { Database } from "bun:sqlite";
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { eq, ne } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/bun-sqlite";
 import { migrate } from "drizzle-orm/bun-sqlite/migrator";
 import { AgentRegistry } from "../agents/registry";
@@ -117,7 +118,7 @@ function createTestDb(): { db: DbClient; sqlite: Database } {
   return { db, sqlite };
 }
 
-describe("renewExpiredAgents registry sync", () => {
+describe("renewExpiredAgents", () => {
   let db: DbClient;
   let sqlite: Database;
   let registry: AgentRegistry;
@@ -137,7 +138,8 @@ describe("renewExpiredAgents registry sync", () => {
     id: string;
     expiresAtMs: number;
     cycle: string;
-    lastSeenAtMs: number;
+    lastSeenAtMs: number | null;
+    online?: boolean;
   }) {
     const nowMs = 1_700_000_000_000;
     await db.insert(schema.agent).values({
@@ -152,7 +154,7 @@ describe("renewExpiredAgents registry sync", () => {
     });
     await db.insert(schema.agentStatus).values({
       agentId: args.id,
-      online: true,
+      online: args.online ?? true,
       lastSeenAtMs: args.lastSeenAtMs,
       updatedAtMs: nowMs,
     });
@@ -210,6 +212,104 @@ describe("renewExpiredAgents registry sync", () => {
     const count = await renewExpiredAgents({ db, registry }, nowMs);
     expect(count).toBe(1);
     expect(registry.size()).toBe(0);
+  });
+
+  test("offline agents are skipped until a check after reconnecting", async () => {
+    const oldExpiry = utc(2026, 1, 1);
+    const nowMs = utc(2026, 1, 15);
+    await seedRenewable({
+      id: "a1",
+      expiresAtMs: oldExpiry,
+      cycle: "monthly",
+      lastSeenAtMs: nowMs - 1000,
+      online: false,
+    });
+    await registry.load();
+    const pricingBefore = await db.select().from(schema.agentPricing);
+    const broadcastCalls: string[][] = [];
+    const liveHub = {
+      publishAgentChanges: (ids: string[]) => broadcastCalls.push([...ids]),
+    } as unknown as Parameters<typeof renewExpiredAgents>[0]["liveHub"];
+
+    expect(await renewExpiredAgents({ db, registry, liveHub }, nowMs)).toBe(0);
+    expect(await db.select().from(schema.agentPricing)).toEqual(pricingBefore);
+    expect(registry.getSummary("a1")?.pricing?.expiresAtMs).toBe(oldExpiry);
+    expect(broadcastCalls).toEqual([]);
+
+    await db
+      .update(schema.agentStatus)
+      .set({ online: true })
+      .where(eq(schema.agentStatus.agentId, "a1"));
+
+    expect(await renewExpiredAgents({ db, registry, liveHub }, nowMs)).toBe(1);
+    const [pricing] = await db.select().from(schema.agentPricing);
+    expect(pricing?.expiresAtMs).toBe(utc(2026, 2, 1));
+    expect(registry.getSummary("a1")?.pricing?.expiresAtMs).toBe(utc(2026, 2, 1));
+    expect(broadcastCalls).toEqual([["a1"]]);
+  });
+
+  test.each([utc(2025, 12, 1), null])(
+    "online agents renew regardless of lastSeenAtMs (%s)",
+    async (lastSeenAtMs) => {
+      await seedRenewable({
+        id: "a1",
+        expiresAtMs: utc(2026, 1, 1),
+        cycle: "monthly",
+        lastSeenAtMs,
+      });
+      await registry.load();
+
+      expect(await renewExpiredAgents({ db, registry }, utc(2026, 1, 15))).toBe(1);
+      const [pricing] = await db.select().from(schema.agentPricing);
+      expect(pricing?.expiresAtMs).toBe(utc(2026, 2, 1));
+      expect(registry.getSummary("a1")?.pricing?.expiresAtMs).toBe(utc(2026, 2, 1));
+    },
+  );
+
+  test("agents that go offline after the scan are not renewed or broadcast", async () => {
+    const oldExpiry = utc(2026, 1, 1);
+    const nowMs = utc(2026, 1, 15);
+    for (const id of ["a1", "a2"]) {
+      await seedRenewable({
+        id,
+        expiresAtMs: oldExpiry,
+        cycle: "monthly",
+        lastSeenAtMs: nowMs - 1000,
+      });
+    }
+    await registry.load();
+    const pricingBefore = await db.select().from(schema.agentPricing);
+    const broadcastCalls: string[][] = [];
+    const liveHub = {
+      publishAgentChanges: (ids: string[]) => broadcastCalls.push([...ids]),
+    } as unknown as Parameters<typeof renewExpiredAgents>[0]["liveHub"];
+    const syncPricingFromDb = registry.syncPricingFromDb.bind(registry);
+    let firstRenewedId: string | undefined;
+    const syncSpy = spyOn(registry, "syncPricingFromDb").mockImplementationOnce(async (agentId) => {
+      firstRenewedId = agentId;
+      // Both agents were selected; disconnect the remaining one before its UPDATE.
+      await db
+        .update(schema.agentStatus)
+        .set({ online: false })
+        .where(ne(schema.agentStatus.agentId, agentId));
+      return syncPricingFromDb(agentId);
+    });
+
+    try {
+      expect(await renewExpiredAgents({ db, registry, liveHub }, nowMs)).toBe(1);
+      expect(syncSpy).toHaveBeenCalledTimes(1);
+      expect(firstRenewedId).toBeDefined();
+      expect(broadcastCalls).toEqual([[firstRenewedId!]]);
+      const skipped = pricingBefore.find((row) => row.agentId !== firstRenewedId)!;
+      const [pricing] = await db
+        .select()
+        .from(schema.agentPricing)
+        .where(eq(schema.agentPricing.agentId, skipped.agentId));
+      expect(pricing).toEqual(skipped);
+      expect(registry.getSummary(skipped.agentId)?.pricing?.expiresAtMs).toBe(oldExpiry);
+    } finally {
+      syncSpy.mockRestore();
+    }
   });
 
   test("broadcast only covers ids that actually synced into the registry", async () => {

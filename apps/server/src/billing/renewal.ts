@@ -1,4 +1,4 @@
-import { and, eq, inArray, isNotNull, lt } from "drizzle-orm";
+import { and, eq, exists, inArray, isNotNull, lt } from "drizzle-orm";
 import type { AgentRegistry } from "../agents/registry";
 import type { DbClient } from "../db/client";
 import { agentPricing, agentStatus } from "../db/schema";
@@ -7,7 +7,6 @@ import { startIntervalTask } from "../util/interval-task";
 import { getPricingCycleMonths, RENEWABLE_PRICING_CYCLES } from "./pricing-cycles";
 
 const RENEWAL_INTERVAL_MS = 60 * 60 * 1000; // 1 hour
-const RECENTLY_SEEN_MS = 72 * 60 * 60 * 1000; // 72 hours
 
 export function addMonthsUtc(tsMs: number, months: number): number {
   const d = new Date(tsMs);
@@ -36,7 +35,6 @@ type ExpiredRow = {
   agentId: string;
   expiresAtMs: number | null;
   cycle: string;
-  lastSeenAtMs: number | null;
 };
 
 async function loadExpiredAgents(db: DbClient, nowMs: number): Promise<ExpiredRow[]> {
@@ -45,12 +43,12 @@ async function loadExpiredAgents(db: DbClient, nowMs: number): Promise<ExpiredRo
       agentId: agentPricing.agentId,
       expiresAtMs: agentPricing.expiresAtMs,
       cycle: agentPricing.cycle,
-      lastSeenAtMs: agentStatus.lastSeenAtMs,
     })
     .from(agentPricing)
     .innerJoin(agentStatus, eq(agentPricing.agentId, agentStatus.agentId))
     .where(
       and(
+        eq(agentStatus.online, true),
         isNotNull(agentPricing.expiresAtMs),
         lt(agentPricing.expiresAtMs, nowMs),
         inArray(agentPricing.cycle, RENEWABLE_PRICING_CYCLES),
@@ -69,13 +67,11 @@ export async function renewExpiredAgents(
   nowMs: number = Date.now(),
 ): Promise<number> {
   const rows = await loadExpiredAgents(deps.db, nowMs);
-  const recentThreshold = nowMs - RECENTLY_SEEN_MS;
 
   let renewedCount = 0;
   const broadcastIds: string[] = [];
   for (const row of rows) {
     if (row.expiresAtMs === null) continue;
-    if (row.lastSeenAtMs === null || row.lastSeenAtMs < recentThreshold) continue;
 
     const newExpiry = advanceExpiry(row.expiresAtMs, row.cycle, nowMs);
     if (newExpiry === null) continue;
@@ -83,11 +79,21 @@ export async function renewExpiredAgents(
     // Conditional update on the old expiry value keeps the DB safe if a PATCH
     // /agents/:id/pricing commits concurrently — we won't clobber a just-
     // written value.
+    // Recheck presence atomically: an agent may go offline after the scan.
     const updated = await deps.db
       .update(agentPricing)
       .set({ expiresAtMs: newExpiry, updatedAtMs: nowMs })
       .where(
-        and(eq(agentPricing.agentId, row.agentId), eq(agentPricing.expiresAtMs, row.expiresAtMs)),
+        and(
+          eq(agentPricing.agentId, row.agentId),
+          eq(agentPricing.expiresAtMs, row.expiresAtMs),
+          exists(
+            deps.db
+              .select({ agentId: agentStatus.agentId })
+              .from(agentStatus)
+              .where(and(eq(agentStatus.agentId, row.agentId), eq(agentStatus.online, true))),
+          ),
+        ),
       )
       .returning({ agentId: agentPricing.agentId });
 
