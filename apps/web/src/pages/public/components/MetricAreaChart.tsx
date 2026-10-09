@@ -91,7 +91,6 @@ type ChartState =
   | { kind: ChartPlaceholderStatus };
 
 function MetricAreaChart(props: AreaChartConfig) {
-  const { timezone } = useSiteConfig();
   const [chartWindow, setChartWindow] = React.useState<MetricWindow>("live");
   const [rangeEndMs, setRangeEndMs] = React.useState(() => Date.now());
   const Icon = props.icon;
@@ -111,13 +110,8 @@ function MetricAreaChart(props: AreaChartConfig) {
   const seriesData = activeSeries.data;
   const seriesError = activeSeries.error;
 
-  const chart = React.useMemo((): ChartState => {
-    if (chartWindow === "live") {
-      if (props.liveBuffer.length >= 2) return { kind: "ready", data: props.liveBuffer };
-      if (props.liveSeedStatus === "error") return { kind: "error" };
-      if (props.liveSeedStatus === "loading") return { kind: "loading" };
-      return { kind: "empty" };
-    }
+  const historicalChart = React.useMemo((): ChartState => {
+    if (chartWindow === "live") return { kind: "empty" };
 
     if (seriesError) return { kind: "error" };
     if (!seriesData) return { kind: "loading" };
@@ -148,14 +142,76 @@ function MetricAreaChart(props: AreaChartConfig) {
     return { kind: "ready", data };
   }, [
     chartWindow,
-    props.liveBuffer,
-    props.liveSeedStatus,
     props.isNetwork,
     props.dataKey,
     props.dataKey2,
     seriesData,
     seriesError,
   ]);
+
+  const chart = React.useMemo((): ChartState => {
+    if (chartWindow !== "live") return historicalChart;
+    if (props.liveBuffer.length >= 2) return { kind: "ready", data: props.liveBuffer };
+    if (props.liveSeedStatus === "error") return { kind: "error" };
+    if (props.liveSeedStatus === "loading") return { kind: "loading" };
+    return { kind: "empty" };
+  }, [chartWindow, historicalChart, props.liveBuffer, props.liveSeedStatus]);
+
+  return (
+    <div className="hina-metric-card overflow-hidden rounded-xl border border-border bg-card backdrop-blur-sm">
+      <div className="flex flex-col gap-2 border-b border-border px-3 py-2.5 sm:flex-row sm:items-center sm:gap-3 sm:px-5 sm:py-3.5">
+        <div className="flex flex-1 items-center justify-between gap-2 sm:gap-3">
+          <div className="flex items-center gap-2">
+            <span className="text-muted-foreground">
+              <Icon className="size-4" />
+            </span>
+            <h3 className="stat-label font-semibold">{props.title}</h3>
+          </div>
+          <span className="stat-value font-mono font-semibold">{props.currentValue}</span>
+        </div>
+        <div className="self-end sm:self-auto">
+          <TimeRangeSelector value={chartWindow} onChange={setChartWindow} windows={METRIC_WINDOWS} />
+        </div>
+      </div>
+
+      <MetricChartPlot
+        chart={chart}
+        chartWindow={chartWindow}
+        title={props.title}
+        color={props.color}
+        color2={props.color2}
+        dataKey={props.dataKey}
+        dataKey2={props.dataKey2}
+        dataKeyLabel={props.dataKeyLabel}
+        dataKey2Label={props.dataKey2Label}
+        domainMax={props.domainMax}
+        yTickFormatter={props.yTickFormatter}
+        tooltipValueFormatter={props.tooltipValueFormatter}
+      />
+    </div>
+  );
+}
+
+type MetricChartPlotProps = Pick<
+  AreaChartConfig,
+  | "title"
+  | "color"
+  | "color2"
+  | "dataKey"
+  | "dataKey2"
+  | "dataKeyLabel"
+  | "dataKey2Label"
+  | "domainMax"
+  | "yTickFormatter"
+  | "tooltipValueFormatter"
+> & {
+  chart: ChartState;
+  chartWindow: MetricWindow;
+};
+
+const MetricChartPlot = React.memo(function MetricChartPlot(props: MetricChartPlotProps) {
+  const { chart, chartWindow } = props;
+  const { timezone } = useSiteConfig();
 
   const xTickFormatter = React.useMemo(
     () => getMetricTimeAxisFormatter(chartWindow, timezone),
@@ -182,28 +238,12 @@ function MetricAreaChart(props: AreaChartConfig) {
   const tooltipFormatter = props.tooltipValueFormatter ?? props.yTickFormatter;
 
   return (
-    <div className="hina-metric-card overflow-hidden rounded-xl border border-border bg-card backdrop-blur-sm">
-      <div className="flex flex-col gap-2 border-b border-border px-3 py-2.5 sm:flex-row sm:items-center sm:gap-3 sm:px-5 sm:py-3.5">
-        <div className="flex flex-1 items-center justify-between gap-2 sm:gap-3">
-          <div className="flex items-center gap-2">
-            <span className="text-muted-foreground">
-              <Icon className="size-4" />
-            </span>
-            <h3 className="stat-label font-semibold">{props.title}</h3>
-          </div>
-          <span className="stat-value font-mono font-semibold">{props.currentValue}</span>
+    <div className="p-2 pt-1">
+      {chart.kind !== "ready" ? (
+        <div style={{ height: 180 }}>
+          <ChartPlaceholder status={chart.kind} />
         </div>
-        <div className="self-end sm:self-auto">
-          <TimeRangeSelector value={chartWindow} onChange={setChartWindow} windows={METRIC_WINDOWS} />
-        </div>
-      </div>
-
-      <div className="p-2 pt-1">
-        {chart.kind !== "ready" ? (
-          <div style={{ height: 180 }}>
-            <ChartPlaceholder status={chart.kind} />
-          </div>
-        ) : (
+      ) : (
         <ResponsiveContainer width="100%" height={180}>
           <AreaChart data={chart.data as TimeSeriesPoint[]} margin={{ top: 10, right: 4, left: -12, bottom: 0 }}>
             <defs>
@@ -282,10 +322,9 @@ function MetricAreaChart(props: AreaChartConfig) {
             ) : null}
           </AreaChart>
         </ResponsiveContainer>
-        )}
-      </div>
+      )}
     </div>
   );
-}
+});
 
 export const MemoMetricAreaChart = React.memo(MetricAreaChart);
