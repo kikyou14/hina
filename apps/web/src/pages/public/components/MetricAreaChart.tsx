@@ -91,17 +91,28 @@ type ChartState =
   | { kind: ChartPlaceholderStatus };
 
 function MetricAreaChart(props: AreaChartConfig) {
-  const [chartWindow, setChartWindow] = React.useState<MetricWindow>("live");
-  const [rangeEndMs, setRangeEndMs] = React.useState(() => Date.now());
+  const [chartRange, setChartRange] = React.useState(() => ({
+    window: "live" as MetricWindow,
+    endMs: Date.now(),
+  }));
+  const chartWindow = chartRange.window;
+  const setChartWindow = React.useCallback((window: MetricWindow) => {
+    const endMs = Date.now();
+    setChartRange((current) => {
+      if (window === current.window) return current;
+      return { window, endMs };
+    });
+  }, []);
   const Icon = props.icon;
 
   React.useEffect(() => {
-    setRangeEndMs(Date.now());
-  }, [chartWindow, props.agentId]);
+    const endMs = Date.now();
+    setChartRange((current) => ({ ...current, endMs }));
+  }, [props.agentId]);
 
   const rangeMs = getMetricWindowRangeMs(chartWindow);
-  const fromMs = rangeEndMs - rangeMs;
-  const toMs = rangeEndMs;
+  const fromMs = chartRange.endMs - rangeMs;
+  const toMs = chartRange.endMs;
 
   const activeSeries = usePublicAgentSeries(
     { agentId: props.agentId, fromMs, toMs, resolution: "auto", maxPoints: 2000 },
