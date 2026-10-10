@@ -29,6 +29,7 @@ import {
 import { formatLocalDateTime, formatMsNumber } from "../lib/chartHelpers";
 import { LATENCY_WINDOWS, type LatencyWindow } from "../lib/timeWindows";
 import { TimeRangeSelector } from "./MetricAreaChart";
+import { TcpProbeLatest } from "./TcpProbeLatest";
 
 type LatencyLineSpec = TimeSeriesLineSpec & { data: readonly LatencySeriesPoint[] };
 
@@ -154,7 +155,7 @@ function LatencyStats(props: {
     const color = PROBE_LINE_COLORS[idx % PROBE_LINE_COLORS.length]!;
     const selected = props.selectedProbeTaskIds.includes(taskId);
     const s = props.statsByTaskId.get(taskId) ?? EMPTY_PROBE_TASK_STATS;
-    return { taskId, label, color, selected, ...s };
+    return { taskId, label, color, selected, tcpLatest: r.task.kind === "tcp" ? r.latest : null, ...s };
   });
 
   if (entries.length === 0) return null;
@@ -196,6 +197,7 @@ function LatencyStats(props: {
               ) : (
                 <p className="font-mono text-xs text-muted-foreground/60">-</p>
               )}
+              {s.tcpLatest ? <TcpProbeLatest latest={s.tcpLatest} /> : null}
             </div>
           </button>
         ))}

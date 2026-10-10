@@ -4,21 +4,21 @@ import { agent, agentStatus, probeTask, probeTaskAgent, probeTaskGroup } from ".
 import type { ProbeConfigBody, ProbeTaskKind, ProbeTaskWire } from "../protocol/envelope";
 import { isRecord, safeJsonParse } from "../util/lang";
 
+import {
+  capabilitySupportsTcpPacketSize,
+  capabilitySupportsTracerouteTcpSizePair,
+} from "../util/probe-capabilities";
+
 function isProbeKind(value: string): value is ProbeTaskKind {
   return value === "icmp" || value === "tcp" || value === "http" || value === "traceroute";
 }
 
-export function capabilitySupportsTracerouteTcpSizePair(cap: unknown): boolean {
-  if (!isRecord(cap)) return false;
-  const probes = cap["probes"];
-  if (!isRecord(probes)) return false;
-  const traceroute = probes["traceroute"];
-  if (!isRecord(traceroute)) return false;
-  return traceroute["tcpSizePair"] === true;
-}
-
 function isTracerouteTcpSizePairTarget(target: unknown): boolean {
   return isRecord(target) && target["protocol"] === "tcp";
+}
+
+function isTcpPacketSizeTarget(target: unknown): boolean {
+  return isRecord(target) && target["packetSize"] !== undefined;
 }
 
 type TaskRow = {
@@ -85,6 +85,7 @@ export type BuildProbeConfigOptions = {
   scope: AgentProbeScope;
   rev: number;
   supportsTracerouteTcpSizePair?: boolean;
+  supportsTcpPacketSize?: boolean;
 };
 
 export async function buildProbeConfigForAgent(
@@ -141,6 +142,10 @@ export async function buildProbeConfigForAgent(
       continue;
     }
 
+    if (r.kind === "tcp" && isTcpPacketSizeTarget(tar) && !options.supportsTcpPacketSize) {
+      continue;
+    }
+
     tasks.push({
       id: r.id,
       name: r.name,
@@ -154,7 +159,7 @@ export async function buildProbeConfigForAgent(
   return { rev: options.rev, tasks };
 }
 
-export type TracerouteTcpSupport = {
+export type TcpProbeSupport = {
   targetAgents: number;
   unsupportedAgents: number;
 };
@@ -166,14 +171,16 @@ type SupportCountTaskRow = {
   allAgents: boolean;
 };
 
-export async function computeTracerouteTcpSupportCounts(
+export async function computeTcpProbeSupportCounts(
   db: DbClient,
   tasks: SupportCountTaskRow[],
-): Promise<Map<string, TracerouteTcpSupport>> {
-  const result = new Map<string, TracerouteTcpSupport>();
+): Promise<Map<string, TcpProbeSupport>> {
+  const result = new Map<string, TcpProbeSupport>();
 
   const tcpTasks = tasks.filter(
-    (t) => t.kind === "traceroute" && isTracerouteTcpSizePairTarget(safeJsonParse(t.targetJson)),
+    (t) =>
+      (t.kind === "traceroute" && isTracerouteTcpSizePairTarget(safeJsonParse(t.targetJson))) ||
+      (t.kind === "tcp" && isTcpPacketSizeTarget(safeJsonParse(t.targetJson))),
   );
   if (tcpTasks.length === 0) return result;
 
@@ -186,15 +193,14 @@ export async function computeTracerouteTcpSupportCounts(
     .from(agent)
     .leftJoin(agentStatus, eq(agentStatus.agentId, agent.id));
 
-  const supportById = new Map<string, boolean>();
+  const supportById = new Map<string, { traceroute: boolean; tcp: boolean }>();
   const agentIdsByGroup = new Map<string, string[]>();
   for (const row of agentRows) {
-    supportById.set(
-      row.id,
-      capabilitySupportsTracerouteTcpSizePair(
-        row.capabilitiesJson ? safeJsonParse(row.capabilitiesJson) : null,
-      ),
-    );
+    const cap = row.capabilitiesJson ? safeJsonParse(row.capabilitiesJson) : null;
+    supportById.set(row.id, {
+      traceroute: capabilitySupportsTracerouteTcpSizePair(cap),
+      tcp: capabilitySupportsTcpPacketSize(cap),
+    });
     if (row.groupId) {
       const list = agentIdsByGroup.get(row.groupId) ?? [];
       list.push(row.id);
@@ -241,7 +247,8 @@ export async function computeTracerouteTcpSupportCounts(
 
     let unsupportedAgents = 0;
     for (const id of targetIds) {
-      if (!supportById.get(id)) unsupportedAgents += 1;
+      const support = supportById.get(id);
+      if (!(task.kind === "tcp" ? support?.tcp : support?.traceroute)) unsupportedAgents += 1;
     }
     result.set(task.id, { targetAgents: targetIds.size, unsupportedAgents });
   }

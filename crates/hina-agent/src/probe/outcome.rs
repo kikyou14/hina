@@ -58,6 +58,11 @@ impl ProbeOutcome {
         self
     }
 
+    pub(crate) fn with_extra_field(mut self, key: &str, value: Value) -> Self {
+        self.extra.get_or_insert_with(|| serde_json::json!({}))[key] = value;
+        self
+    }
+
     pub(crate) fn with_loss_pct(mut self, loss_pct: f64) -> Self {
         self.loss_pct = Some(loss_pct);
         self

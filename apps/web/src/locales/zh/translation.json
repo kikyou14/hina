@@ -328,6 +328,23 @@
     "agentCount": "{{count}} 个节点"
   },
   "probes": {
+    "tcpResult": {
+      "latest": "最近一次探测",
+      "success": "成功",
+      "failed": "失败",
+      "errors": {
+        "timeout": "探测超时",
+        "connection_refused": "连接被拒绝",
+        "permission_denied": "权限不足或网络策略阻止",
+        "connect_failed": "连接失败",
+        "packet_too_large": "报文超过允许的 MTU",
+        "dest_unreachable": "目标不可达",
+        "ipv6_not_supported": "无可用的 IPv4 目标",
+        "unsupported_platform": "节点平台不支持",
+        "dns_lookup_failed": "DNS 解析失败",
+        "dns_no_records": "无 DNS 记录"
+      }
+    },
     "title": "探测任务",
     "createTask": "创建任务",
     "createDialog": {
@@ -351,11 +368,18 @@
     },
     "tcpUnsupported": {
       "someLabel": "{{unsupported}}/{{total}} 不支持",
-      "someTitle": "{{total}} 个目标节点中有 {{unsupported}} 个不支持 TCP 双尺寸探测，将跳过该任务。",
+      "someTitle": "{{total}} 个目标节点中有 {{unsupported}} 个不支持此 TCP 探测模式，将跳过该任务。",
       "noneLabel": "无节点支持",
-      "noneTitle": "{{total}} 个目标节点均不支持 TCP 双尺寸探测；在有支持的节点接入前，该任务不会在任何节点执行。"
+      "noneTitle": "{{total}} 个目标节点均不支持此 TCP 探测模式；在有支持的节点接入前，该任务不会在任何节点执行。"
     },
     "form": {
+      "tcpPacketSize": "TCP 探测模式",
+      "tcpSystemConnect": "系统建连（默认）",
+      "tcpSmallPacket": "小包 · 40B",
+      "tcpLargePacket": "大包 · 1200B",
+      "tcpPacketSizeHint": "定长探测测量 SYN 响应时间，仅支持 Linux 和 IPv4；大小包含 IP 和 TCP 头，节点需要原始套接字权限。",
+      "tcpPacketSizeSupport": "所选 {{total}} 个节点中有 {{supported}} 个支持定长探测，不支持的节点将跳过此类任务。",
+      "tcpPacketSizeIpv4Only": "定长 TCP 探测需要 IPv4 地址或具有 IPv4 记录的域名。",
       "intervalSec": "间隔 (秒)",
       "timeoutMs": "超时 (毫秒)",
       "target": "目标",

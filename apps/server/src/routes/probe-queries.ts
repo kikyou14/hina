@@ -11,6 +11,7 @@ import {
   probeTaskGroup,
 } from "../db/schema";
 import { HOURLY_RETENTION_DAYS, RAW_RETENTION_DAYS } from "../rollup/retention";
+import { isRecord, safeJsonParse } from "../util/lang";
 import {
   anonymizeTracerouteExtraForPublic,
   sanitizeTracerouteExtraRawJsonForPublic,
@@ -61,6 +62,7 @@ export async function queryProbeLatest(db: Db, agentId: string) {
       ok: probeResultLatest.ok,
       latMs: probeResultLatest.latMs,
       code: probeResultLatest.code,
+      err: probeResultLatest.err,
       extraJson: probeResultLatest.extraJson,
       lossPct: probeResultLatest.lossPct,
       jitterMs: probeResultLatest.jitterMs,
@@ -104,11 +106,37 @@ export type ProbeLatestPrivacy = "anonymized" | "full";
 
 type ProbeLatestRow = Awaited<ReturnType<typeof queryProbeLatest>>[number];
 
+const PUBLIC_TCP_ERRORS = new Set([
+  "timeout",
+  "connection_refused",
+  "permission_denied",
+  "connect_failed",
+  "packet_too_large",
+  "dest_unreachable",
+  "ipv6_not_supported",
+  "unsupported_platform",
+  "dns_lookup_failed",
+  "dns_no_records",
+]);
+
+function publicTcpExtra(extraJson: string | null): { packet_size_bytes: 40 | 1200 } | null {
+  if (!extraJson) return null;
+  const extra = safeJsonParse(extraJson);
+  if (!isRecord(extra)) return null;
+  const size = extra["packet_size_bytes"];
+  return size === 40 || size === 1200 ? { packet_size_bytes: size } : null;
+}
+
 export function formatProbeLatestResults(rows: ProbeLatestRow[], privacy: ProbeLatestPrivacy) {
   return rows.map((r) => {
     let extra: unknown = null;
     let extraParseError = false;
     let extraRawJson: string | null = null;
+
+    // TCP diagnostics may contain private targets and resolver/OS messages.
+    // This endpoint exposes only known codes and the result's packet-size snapshot.
+    const err = r.taskKind === "tcp" && !r.ok && PUBLIC_TCP_ERRORS.has(r.err ?? "") ? r.err : null;
+    if (r.taskKind === "tcp") extra = publicTcpExtra(r.extraJson);
 
     if (r.taskKind === "traceroute" && r.extraJson) {
       const revealHopDetails = r.taskTraceRevealHopDetails === true;
@@ -147,7 +175,7 @@ export function formatProbeLatestResults(rows: ProbeLatestRow[], privacy: ProbeL
         ok: r.ok,
         latMs: r.latMs ?? null,
         code: r.code ?? null,
-        err: null,
+        err,
         extra,
         extraParseError,
         extraRawJson,

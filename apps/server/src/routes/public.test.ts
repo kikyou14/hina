@@ -143,6 +143,50 @@ describe("public routes surface CLI-created agents without restart", () => {
     expect(res.status).toBe(404);
   });
 
+  test("probe latest returns safe TCP diagnostics from stored results", async () => {
+    await seedAgent(db, { id: "tcp-agent", name: "TCP agent" });
+    const nowMs = Date.now();
+    await db.insert(schema.probeTask).values({
+      id: "tcp-task",
+      name: "TCP",
+      kind: "tcp",
+      enabled: true,
+      allAgents: true,
+      targetJson: JSON.stringify({ host: "private.example", port: 443, packetSize: 40 }),
+      intervalSec: 60,
+      timeoutMs: 5000,
+      createdAtMs: nowMs,
+      updatedAtMs: nowMs,
+    });
+    await db.insert(schema.probeResultLatest).values({
+      agentId: "tcp-agent",
+      taskId: "tcp-task",
+      tsMs: nowMs - 1000,
+      recvTsMs: nowMs,
+      ok: false,
+      err: "packet_too_large",
+      extraJson: JSON.stringify({
+        packet_size_bytes: 1200,
+        host: "private.example",
+        addrs: ["10.0.0.1"],
+        last_error: { message: "private diagnostic" },
+      }),
+      updatedAtMs: nowMs,
+    });
+    const res = await fetchPublic(app, "http://test/api/public/agents/tcp-agent/probe-latest");
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      results: Array<{ latest: { err: string; extra: unknown; tsMs: number } }>;
+    };
+    expect(body.results[0]?.latest).toMatchObject({
+      err: "packet_too_large",
+      extra: { packet_size_bytes: 1200 },
+      tsMs: nowMs - 1000,
+    });
+    expect(JSON.stringify(body)).not.toContain("private");
+    expect(JSON.stringify(body)).not.toContain("10.0.0.1");
+  });
+
   test("series visibility check recognizes a CLI-created public agent", async () => {
     await seedAgent(db, { id: "cli-public", name: "from-cli", isPublic: true });
     // /series rejects non-existent agents with 404 (via isAgentVisibleInRegistry).

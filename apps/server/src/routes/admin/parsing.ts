@@ -172,7 +172,10 @@ export function parseTarget(
     const port = typeof value["port"] === "number" ? value["port"] : Number.NaN;
     if (!host || !isValidHost(host)) return null;
     if (!Number.isFinite(port) || !Number.isInteger(port) || port < 1 || port > 65535) return null;
-    const target = { host, port };
+    const packetSize = value["packetSize"];
+    if (packetSize !== undefined && packetSize !== 40 && packetSize !== 1200) return null;
+    if (packetSize !== undefined && isIpv6(host)) return null;
+    const target = packetSize === undefined ? { host, port } : { host, port, packetSize };
     return { target, targetJson: JSON.stringify(target) };
   }
 

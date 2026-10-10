@@ -1,6 +1,7 @@
 import * as React from "react";
 import { useTranslation } from "react-i18next";
 
+import type { AdminAgentOption } from "@/api/adminAgents";
 import type { AdminProbeTask, ProbeKind, ProbeTaskTarget } from "@/api/adminProbes";
 import type { ScopeState } from "@/components/ScopeSelector";
 import { ScopeSelector } from "@/components/ScopeSelector";
@@ -28,6 +29,9 @@ import {
   TRACEROUTE_TCP_PACKET_SIZE_MAX,
   TRACEROUTE_TCP_PACKET_SIZE_MIN,
   tracerouteProtocolOfTarget,
+  tcpPacketSizeOfTarget,
+  tcpPacketSizeSupport,
+  type TcpPacketSize,
   type ProbeTaskFormValue,
   type TracerouteProtocol,
 } from "../lib/probeValidation";
@@ -72,7 +76,7 @@ function initScopeFromTask(task: AdminProbeTask | null): ScopeState {
 export function ProbeTaskForm(props: {
   mode: "create" | "edit";
   task?: AdminProbeTask;
-  agents: Array<{ id: string; name: string; group: string | null }>;
+  agents: AdminAgentOption[];
   groups: Array<{ id: string; name: string }>;
   pending: boolean;
   onSubmit: (v: ProbeTaskFormValue) => Promise<void>;
@@ -95,6 +99,10 @@ export function ProbeTaskForm(props: {
   const initialUrl = initialTarget && "url" in initialTarget ? String(initialTarget.url) : "";
   const initialTcpTraceroute = isTcpTracerouteTarget(initialTarget) ? initialTarget : null;
 
+  const [tcpPacketSize, setTcpPacketSize] = React.useState<TcpPacketSize | undefined>(() =>
+    tcpPacketSizeOfTarget(initialTarget),
+  );
+
   const [host, setHost] = React.useState(initialHost);
   const [port, setPort] = React.useState(initialPort);
   const [url, setUrl] = React.useState(initialUrl);
@@ -113,6 +121,8 @@ export function ProbeTaskForm(props: {
 
   const [scope, setScope] = React.useState<ScopeState>(() => initScopeFromTask(tsk));
 
+  const packetSizeSupport = tcpPacketSizeSupport(props.agents, scope);
+
   const [error, setError] = React.useState<ProbeFormError | null>(null);
 
   function clearErrorForFields(fields: readonly ProbeFormField[]) {
@@ -128,7 +138,11 @@ export function ProbeTaskForm(props: {
     if (kind === "tcp") {
       const p = parseIntegerInput(port);
       if (!host.trim() || p === null) return null;
-      return { host: host.trim(), port: p };
+      return {
+        host: host.trim(),
+        port: p,
+        ...(tcpPacketSize === undefined ? {} : { packetSize: tcpPacketSize }),
+      };
     }
     if (kind === "traceroute" && tracerouteProtocol === "tcp") {
       if (!host.trim()) return null;
@@ -141,7 +155,17 @@ export function ProbeTaskForm(props: {
       return { host: host.trim(), protocol: "tcp", port: p, packetSizes };
     }
     return host.trim() ? { host: host.trim() } : null;
-  }, [kind, host, port, url, tracerouteProtocol, tracerouteTcpPort, smallSize, largeSize]);
+  }, [
+    kind,
+    host,
+    port,
+    url,
+    tcpPacketSize,
+    tracerouteProtocol,
+    tracerouteTcpPort,
+    smallSize,
+    largeSize,
+  ]);
 
   const scopeValid =
     scope.mode === "all" ||
@@ -195,7 +219,15 @@ export function ProbeTaskForm(props: {
               setError({ text: t("probes.form.invalidPort"), field: "port" });
               return;
             }
-            validTarget = { host: trimmedHost, port: p };
+            if (tcpPacketSize !== undefined && isIpv6Literal(trimmedHost)) {
+              setError({ text: t("probes.form.tcpPacketSizeIpv4Only"), field: "host" });
+              return;
+            }
+            validTarget = {
+              host: trimmedHost,
+              port: p,
+              ...(tcpPacketSize === undefined ? {} : { packetSize: tcpPacketSize }),
+            };
           } else {
             // icmp / traceroute
             const trimmedHost = host.trim();
@@ -410,6 +442,34 @@ export function ProbeTaskForm(props: {
                 placeholder="443"
                 aria-invalid={error?.field === "port"}
               />
+            </div>
+            <div className="col-span-2 grid gap-1.5">
+              <SectionLabel>{t("probes.form.tcpPacketSize")}</SectionLabel>
+              <Select
+                value={tcpPacketSize === undefined ? "connect" : String(tcpPacketSize)}
+                disabled={props.pending}
+                onValueChange={(value) => {
+                  setTcpPacketSize(value === "40" ? 40 : value === "1200" ? 1200 : undefined);
+                  clearErrorForFields(["host"]);
+                }}
+              >
+                <SelectTrigger className="w-full" aria-label={t("probes.form.tcpPacketSize")}>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="connect">{t("probes.form.tcpSystemConnect")}</SelectItem>
+                  <SelectItem value="40" disabled={packetSizeSupport.supported === 0}>
+                    {t("probes.form.tcpSmallPacket")}
+                  </SelectItem>
+                  <SelectItem value="1200" disabled={packetSizeSupport.supported === 0}>
+                    {t("probes.form.tcpLargePacket")}
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+              <p className="text-muted-foreground text-xs">{t("probes.form.tcpPacketSizeHint")}</p>
+              <p className="text-muted-foreground text-xs" role="status">
+                {t("probes.form.tcpPacketSizeSupport", packetSizeSupport)}
+              </p>
             </div>
           </div>
         ) : kind === "traceroute" ? (

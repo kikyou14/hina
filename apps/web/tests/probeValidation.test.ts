@@ -1,6 +1,8 @@
 import { describe, expect, test } from "bun:test";
 
 import {
+  tcpPacketSizeOfTarget,
+  tcpPacketSizeSupport,
   isTcpTracerouteTarget,
   isValidPort,
   isValidTracerouteTcpPacketSize,
@@ -141,5 +143,31 @@ describe("tracerouteProtocolOfTarget", () => {
   test("returns icmp when there is no existing target (new task)", () => {
     expect(tracerouteProtocolOfTarget(null)).toBe("icmp");
     expect(tracerouteProtocolOfTarget(undefined)).toBe("icmp");
+  });
+});
+
+describe("TCP fixed packet size", () => {
+  test("preserves legacy connect targets and recognizes both presets", () => {
+    expect(tcpPacketSizeOfTarget({ host: "example.com", port: 443 })).toBeUndefined();
+    expect(tcpPacketSizeOfTarget({ host: "example.com", port: 443, packetSize: 40 })).toBe(40);
+    expect(tcpPacketSizeOfTarget({ host: "example.com", port: 443, packetSize: 1200 })).toBe(1200);
+  });
+
+  test("counts only the current scope, without including stale selections from other modes", () => {
+    const agents = [
+      { id: "linux", name: "linux", group: "group", groupId: "g1", tcpPacketSizeSupported: true },
+      { id: "old", name: "old", group: "group", groupId: "g1", tcpPacketSizeSupported: false },
+      { id: "mac", name: "mac", group: null, groupId: null, tcpPacketSizeSupported: false },
+    ];
+    expect(
+      tcpPacketSizeSupport(agents, { mode: "specific", agentIds: ["mac"], groupIds: ["g1"] }),
+    ).toEqual({ total: 1, supported: 0 });
+    expect(
+      tcpPacketSizeSupport(agents, { mode: "groups", agentIds: ["mac"], groupIds: ["g1"] }),
+    ).toEqual({ total: 2, supported: 1 });
+    expect(tcpPacketSizeSupport(agents, { mode: "all", agentIds: [], groupIds: [] })).toEqual({
+      total: 3,
+      supported: 1,
+    });
   });
 });

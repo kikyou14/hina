@@ -420,6 +420,7 @@ mod tests {
             target: ProbeTarget::Tcp {
                 host: host.to_string(),
                 port,
+                packet_size: None,
             },
         }
     }
@@ -496,6 +497,21 @@ mod tests {
         assert!(diff.start.is_empty());
         assert_eq!(diff.restart.len(), 1);
         assert!(diff.stop.is_empty());
+    }
+
+    #[test]
+    fn plan_task_diff_restarts_changed_tcp_packet_size() {
+        let original = tcp_spec("task-1", 5, 1000, "example.com", 443);
+        let mut updated = original.clone();
+        if let ProbeTarget::Tcp { packet_size, .. } = &mut updated.target {
+            *packet_size = Some(1200);
+        }
+        let diff = plan_task_diff(
+            &current_specs(vec![("task-1", original)]),
+            &current_specs(vec![("task-1", updated)]),
+        );
+        assert_eq!(diff.restart.len(), 1);
+        assert!(diff.keep.is_empty());
     }
 
     #[test]

@@ -79,6 +79,22 @@ describe("AgentRegistry", () => {
     expect(all.map((a) => a.id)).toEqual(["a1", "a2"]);
   });
 
+  test("agent options expose group IDs and fixed TCP support independently of traceroute", async () => {
+    await seedAgent(db, { id: "linux", name: "linux" });
+    await seedAgent(db, { id: "old", name: "old" });
+    await db
+      .update(schema.agentStatus)
+      .set({ lastCapabilitiesJson: JSON.stringify({ probes: { tcp: { packetSize: true } } }) })
+      .where(eq(schema.agentStatus.agentId, "linux"));
+    await registry.load();
+    const options = registry.listOptionRefs();
+    expect(options.find((agent) => agent.id === "linux")).toMatchObject({
+      groupId: null,
+      tcpPacketSizeSupported: true,
+    });
+    expect(options.find((agent) => agent.id === "old")?.tcpPacketSizeSupported).toBe(false);
+  });
+
   test("insert() adds an entry without DB write", async () => {
     await registry.load();
     const nowMs = Date.now();

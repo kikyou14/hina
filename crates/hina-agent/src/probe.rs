@@ -1,9 +1,12 @@
 mod http;
 mod icmp;
 mod outcome;
+mod raw_socket;
 mod runner;
 mod task;
 mod tcp;
+mod tcp_raw;
+mod tcp_syn;
 #[cfg(test)]
 mod tests;
 mod traceroute;
@@ -17,6 +20,7 @@ use tokio::net::lookup_host;
 pub(crate) use icmp::IcmpClients;
 pub(crate) use runner::ApplyConfigResult;
 pub use runner::ProbeRunner;
+pub(crate) use tcp_syn::TCP_PACKET_SIZE_SUPPORTED;
 pub(crate) use traceroute_tcp::TCP_SIZE_PAIR_SUPPORTED;
 
 use crate::protocol::ProbeResultBody;
@@ -35,7 +39,11 @@ pub(crate) async fn execute_probe(
 ) -> ProbeResultBody {
     let deadline = tokio::time::Instant::now() + spec.timeout;
     let outcome = match &spec.target {
-        ProbeTarget::Tcp { host, port } => tcp::probe(host, *port, deadline).await,
+        ProbeTarget::Tcp {
+            host,
+            port,
+            packet_size,
+        } => tcp::probe(host, *port, *packet_size, deadline).await,
         ProbeTarget::Http { url } => http::probe(http_client, url.clone(), spec.timeout).await,
         ProbeTarget::Icmp { host } => icmp::probe(icmp, host, deadline).await,
         ProbeTarget::Traceroute { host, mode } => {

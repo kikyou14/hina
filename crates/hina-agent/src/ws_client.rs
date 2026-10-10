@@ -469,7 +469,8 @@ fn default_capabilities() -> Value {
             }
         },
         "probes": {
-            "traceroute": traceroute
+            "traceroute": traceroute,
+            "tcp": { "packetSize": crate::probe::TCP_PACKET_SIZE_SUPPORTED }
         }
     })
 }

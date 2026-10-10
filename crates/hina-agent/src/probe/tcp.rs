@@ -27,7 +27,30 @@ impl std::fmt::Display for TcpDnsError {
 
 impl std::error::Error for TcpDnsError {}
 
-pub(crate) async fn probe(host: &str, port: u16, deadline: tokio::time::Instant) -> ProbeOutcome {
+pub(crate) async fn probe(
+    host: &str,
+    port: u16,
+    packet_size: Option<u16>,
+    deadline: tokio::time::Instant,
+) -> ProbeOutcome {
+    let outcome = probe_inner(host, port, packet_size, deadline).await;
+    match packet_size {
+        Some(size) => outcome
+            .with_extra_field("kind", serde_json::json!("tcp"))
+            .with_extra_field("packet_size_bytes", serde_json::json!(size)),
+        None => outcome,
+    }
+}
+
+async fn probe_inner(
+    host: &str,
+    port: u16,
+    packet_size: Option<u16>,
+    deadline: tokio::time::Instant,
+) -> ProbeOutcome {
+    if packet_size.is_some() && !super::tcp_syn::TCP_PACKET_SIZE_SUPPORTED {
+        return ProbeOutcome::failure("unsupported_platform");
+    }
     let remaining = remaining_until(deadline);
     if remaining.is_zero() {
         return tcp_probe_error(
@@ -41,7 +64,7 @@ pub(crate) async fn probe(host: &str, port: u16, deadline: tokio::time::Instant)
         );
     }
 
-    let addrs = match resolve_tcp_addrs(host, port, deadline).await {
+    let addrs = match resolve_tcp_addrs(host, port, packet_size.is_some(), deadline).await {
         Ok(addrs) => addrs,
         Err(err) => {
             let (code, message) = err
@@ -67,7 +90,7 @@ pub(crate) async fn probe(host: &str, port: u16, deadline: tokio::time::Instant)
     };
 
     let mut attempted: u64 = 1;
-    spawn_tcp_attempt(&mut join_set, first, deadline);
+    spawn_tcp_attempt(&mut join_set, first, packet_size, deadline);
 
     let mut fallback_armed = !queue.is_empty();
     let fallback_sleep = tokio::time::sleep(TCP_FALLBACK_DELAY);
@@ -92,7 +115,7 @@ pub(crate) async fn probe(host: &str, port: u16, deadline: tokio::time::Instant)
             _ = &mut fallback_sleep, if fallback_armed && join_set.len() < TCP_CONNECT_IN_FLIGHT && !queue.is_empty() => {
                 let addr = queue.pop_front().expect("queue must not be empty");
                 attempted = attempted.saturating_add(1);
-                spawn_tcp_attempt(&mut join_set, addr, deadline);
+                spawn_tcp_attempt(&mut join_set, addr, packet_size, deadline);
                 fallback_armed = false;
             }
 
@@ -137,7 +160,7 @@ pub(crate) async fn probe(host: &str, port: u16, deadline: tokio::time::Instant)
                         break;
                     };
                     attempted = attempted.saturating_add(1);
-                    spawn_tcp_attempt(&mut join_set, next_addr, deadline);
+                    spawn_tcp_attempt(&mut join_set, next_addr, packet_size, deadline);
                 }
             }
         }
@@ -155,10 +178,16 @@ pub(crate) async fn probe(host: &str, port: u16, deadline: tokio::time::Instant)
 }
 
 pub(crate) fn classify_tcp_io_error(err: &std::io::Error) -> &'static str {
+    if super::tcp_raw::is_message_too_long(err) {
+        return "packet_too_large";
+    }
     match err.kind() {
         std::io::ErrorKind::TimedOut => "timeout",
         std::io::ErrorKind::ConnectionRefused => "connection_refused",
         std::io::ErrorKind::PermissionDenied => "permission_denied",
+        std::io::ErrorKind::HostUnreachable | std::io::ErrorKind::NetworkUnreachable => {
+            "dest_unreachable"
+        }
         _ => "connect_failed",
     }
 }
@@ -166,9 +195,16 @@ pub(crate) fn classify_tcp_io_error(err: &std::io::Error) -> &'static str {
 pub(crate) async fn resolve_tcp_addrs(
     host: &str,
     port: u16,
+    ipv4_only: bool,
     deadline: tokio::time::Instant,
 ) -> anyhow::Result<Vec<SocketAddr>> {
     if let Ok(ip) = host.parse::<IpAddr>() {
+        if ipv4_only && ip.is_ipv6() {
+            return Err(anyhow::Error::new(TcpDnsError {
+                code: "ipv6_not_supported",
+                message: "TCP packet size probes require IPv4".into(),
+            }));
+        }
         return Ok(vec![SocketAddr::new(ip, port)]);
     }
 
@@ -216,6 +252,17 @@ pub(crate) async fn resolve_tcp_addrs(
             code: "dns_no_records",
             message: "dns no records".to_string(),
         }));
+    }
+
+    if ipv4_only {
+        if v4.is_empty() {
+            return Err(anyhow::Error::new(TcpDnsError {
+                code: "ipv6_not_supported",
+                message: "no IPv4 records found".into(),
+            }));
+        }
+        v4.truncate(MAX_TCP_ADDRS);
+        return Ok(v4);
     }
 
     let mut out = Vec::<SocketAddr>::with_capacity((v4.len() + v6.len()).min(MAX_TCP_ADDRS));
@@ -267,10 +314,14 @@ async fn tcp_connect_once(
 fn spawn_tcp_attempt(
     join_set: &mut JoinSet<(SocketAddr, Result<u64, std::io::Error>)>,
     addr: SocketAddr,
+    packet_size: Option<u16>,
     deadline: tokio::time::Instant,
 ) {
     join_set.spawn(async move {
-        let result = tcp_connect_once(addr, deadline).await;
+        let result = match packet_size {
+            Some(size) => super::tcp_syn::probe_once(addr, size, deadline).await,
+            None => tcp_connect_once(addr, deadline).await,
+        };
         (addr, result)
     });
 }

@@ -1,4 +1,6 @@
+import type { AdminAgentOption } from "@/api/adminAgents";
 import type { ProbeKind, ProbeTaskTarget } from "@/api/adminProbes";
+import type { ScopeState } from "@/components/ScopeSelector";
 
 export const SELECT_ALL_VALUE = "__all__";
 
@@ -98,4 +100,27 @@ export function parseTracerouteTcpPacketSizes(
   }
   if (small === large) return null;
   return small < large ? [small, large] : [large, small];
+}
+
+export type TcpPacketSize = 40 | 1200;
+
+export function tcpPacketSizeOfTarget(
+  target: ProbeTaskTarget | null | undefined,
+): TcpPacketSize | undefined {
+  if (!target || !("packetSize" in target)) return undefined;
+  return target.packetSize === 40 || target.packetSize === 1200 ? target.packetSize : undefined;
+}
+
+export function tcpPacketSizeSupport(agents: AdminAgentOption[], scope: ScopeState) {
+  const selected = agents.filter(
+    (agent) =>
+      scope.mode === "all" ||
+      (scope.mode === "groups"
+        ? agent.groupId !== null && scope.groupIds.includes(agent.groupId)
+        : scope.agentIds.includes(agent.id)),
+  );
+  return {
+    total: selected.length,
+    supported: selected.filter((agent) => agent.tcpPacketSizeSupported).length,
+  };
 }

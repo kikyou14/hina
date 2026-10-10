@@ -4,11 +4,11 @@ export type ProbeKind = "icmp" | "tcp" | "http" | "traceroute";
 
 export type ProbeTaskTarget =
   | { host: string }
-  | { host: string; port: number }
+  | { host: string; port: number; packetSize?: 40 | 1200 }
   | { host: string; protocol: "tcp"; port: number; packetSizes: [number, number] }
   | { url: string };
 
-export type TcpSizePairSupport = {
+export type TcpProbeSupport = {
   targetAgents: number;
   unsupportedAgents: number;
 };
@@ -27,7 +27,8 @@ export type AdminProbeTask = {
   updatedAtMs: number;
   groups: Array<{ id: string; name: string }>;
   agents: Array<{ id: string; name: string }>;
-  tcpSizePairSupport?: TcpSizePairSupport | null;
+  tcpSizePairSupport?: TcpProbeSupport | null;
+  tcpPacketSizeSupport?: TcpProbeSupport | null;
 };
 
 export type AdminProbeTaskRef = {

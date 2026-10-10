@@ -28,6 +28,7 @@ import {
   type AgentInventoryView,
   type PublicAgentSystemView,
 } from "../util/agent-info";
+import { capabilitySupportsTcpPacketSize } from "../util/probe-capabilities";
 
 export type AgentLatestWire = {
   seq: number;
@@ -772,10 +773,16 @@ export class AgentRegistry {
     return out.sort((a, b) => this.compareById(a.id, b.id));
   }
 
-  listOptionRefs(): { id: string; name: string; group: string | null }[] {
-    const out: { id: string; name: string; group: string | null }[] = [];
+  listOptionRefs() {
+    const out = [];
     for (const entry of this.entries.values()) {
-      out.push({ id: entry.id, name: entry.name, group: entry.groupName });
+      out.push({
+        id: entry.id,
+        name: entry.name,
+        group: entry.groupName,
+        groupId: entry.groupId,
+        tcpPacketSizeSupported: capabilitySupportsTcpPacketSize(entry.lastCapabilities),
+      });
     }
     return out.sort((a, b) => this.compareById(a.id, b.id));
   }

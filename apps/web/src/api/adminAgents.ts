@@ -67,6 +67,8 @@ export type AdminAgentOption = {
   id: string;
   name: string;
   group: string | null;
+  groupId: string | null;
+  tcpPacketSizeSupported: boolean;
 };
 
 export async function getAdminAgents(

@@ -11,6 +11,7 @@ use super::{
     icmp::compute_stats as compute_icmp_stats,
     task::{NormalizeTaskIssue, ProbeTarget, TracerouteMode, normalize_tasks, parse_task},
     tcp::{classify_tcp_io_error, resolve_tcp_addrs},
+    tcp_raw,
     traceroute::{
         HopResult, RawTracerouteResult, build_hop_entries, rdns_best_effort, round_ms,
         traceroute_extra_v1,
@@ -127,6 +128,7 @@ fn normalize_tasks_keeps_first_valid_duplicate() {
         super::task::ProbeTarget::Tcp {
             host: "example.com".to_string(),
             port: 443,
+            packet_size: None,
         }
     );
     assert_eq!(
@@ -330,7 +332,7 @@ fn classify_tcp_io_error_maps_kinds() {
 #[tokio::test]
 async fn resolve_tcp_addrs_ip_literal_skips_dns() {
     let deadline = tokio::time::Instant::now() + Duration::from_secs(1);
-    let addrs = resolve_tcp_addrs("127.0.0.1", 4860, deadline)
+    let addrs = resolve_tcp_addrs("127.0.0.1", 4860, false, deadline)
         .await
         .expect("resolve must succeed");
 
@@ -515,15 +517,11 @@ fn traceroute_tcp_rejects_unknown_protocol() {
 fn tcp_syn_matches_configured_total_length() {
     let source = Ipv4Addr::new(192, 0, 2, 10);
     let dest = Ipv4Addr::new(203, 0, 113, 10);
-    for packet_size in [40u16, 64, 1400, 1500] {
-        let segment =
-            traceroute_tcp::build_tcp_syn(source, dest, 40000, 443, 0x11223344, packet_size);
+    for packet_size in [40u16, 64, 1200, 1400, 1500] {
+        let segment = tcp_raw::build_tcp_syn(source, dest, 40000, 443, 0x11223344, packet_size);
         // Kernel prepends a 20-byte IPv4 header, so segment == packet_size - 20.
         assert_eq!(segment.len(), packet_size as usize - 20);
-        assert_eq!(
-            segment.len(),
-            20 + traceroute_tcp::payload_len_for(packet_size)
-        );
+        assert_eq!(segment.len(), 20 + tcp_raw::payload_len_for(packet_size));
     }
 }
 
@@ -532,12 +530,11 @@ fn tcp_syn_checksum_is_valid_for_even_and_odd_payloads() {
     let source = Ipv4Addr::new(192, 0, 2, 10);
     let dest = Ipv4Addr::new(203, 0, 113, 10);
     // 64 -> payload 24 (even); 41 -> payload 1 (odd).
-    for packet_size in [41u16, 64] {
-        let segment =
-            traceroute_tcp::build_tcp_syn(source, dest, 40000, 443, 0xdead_beef, packet_size);
+    for packet_size in [40u16, 41, 64, 1200] {
+        let segment = tcp_raw::build_tcp_syn(source, dest, 40000, 443, 0xdead_beef, packet_size);
         // Recomputing the checksum over a segment that already carries its
         // checksum must yield zero (ones-complement sum is all ones).
-        assert_eq!(traceroute_tcp::tcp_checksum(source, dest, &segment), 0);
+        assert_eq!(tcp_raw::tcp_checksum(source, dest, &segment), 0);
     }
 }
 
@@ -546,7 +543,7 @@ fn tcp_reset_uses_syn_ack_acknowledgment_as_sequence() {
     let source = Ipv4Addr::new(192, 0, 2, 10);
     let dest = Ipv4Addr::new(203, 0, 113, 10);
     let reset_seq = 0x1234_5678;
-    let segment = traceroute_tcp::build_tcp_reset(source, dest, 40000, 443, reset_seq);
+    let segment = tcp_raw::build_tcp_reset(source, dest, 40000, 443, reset_seq);
 
     assert_eq!(segment.len(), 20);
     assert_eq!(segment[13], 0x04);
@@ -554,7 +551,7 @@ fn tcp_reset_uses_syn_ack_acknowledgment_as_sequence() {
         u32::from_be_bytes(segment[4..8].try_into().unwrap()),
         reset_seq
     );
-    assert_eq!(traceroute_tcp::tcp_checksum(source, dest, &segment), 0);
+    assert_eq!(tcp_raw::tcp_checksum(source, dest, &segment), 0);
 }
 
 struct QuoteSpec {
@@ -606,8 +603,8 @@ fn icmp_quote_matches_tuple_seq_and_total_length() {
         total_length: 64,
     });
 
-    let matched = traceroute_tcp::parse_icmp_tcp_quote(&msg, source, dest, 40000, 443)
-        .expect("quote must match");
+    let matched =
+        tcp_raw::parse_icmp_tcp_quote(&msg, source, dest, 40000, 443).expect("quote must match");
     assert_eq!(matched.inner_seq, 0x1234);
     assert_eq!(matched.inner_total_length, 64);
     assert_eq!(matched.icmp_type, 11);
@@ -631,19 +628,13 @@ fn icmp_quote_rejects_wrong_identity() {
 
     // Wrong destination IP.
     assert!(
-        traceroute_tcp::parse_icmp_tcp_quote(
-            &msg,
-            source,
-            Ipv4Addr::new(198, 51, 100, 1),
-            40000,
-            443
-        )
-        .is_none()
+        tcp_raw::parse_icmp_tcp_quote(&msg, source, Ipv4Addr::new(198, 51, 100, 1), 40000, 443)
+            .is_none()
     );
     // Wrong source port.
-    assert!(traceroute_tcp::parse_icmp_tcp_quote(&msg, source, dest, 40001, 443).is_none());
+    assert!(tcp_raw::parse_icmp_tcp_quote(&msg, source, dest, 40001, 443).is_none());
     // Wrong destination port.
-    assert!(traceroute_tcp::parse_icmp_tcp_quote(&msg, source, dest, 40000, 80).is_none());
+    assert!(tcp_raw::parse_icmp_tcp_quote(&msg, source, dest, 40000, 80).is_none());
 }
 
 #[test]
@@ -662,8 +653,8 @@ fn icmp_fragmentation_needed_reports_next_hop_mtu() {
         total_length: 1500,
     });
 
-    let matched = traceroute_tcp::parse_icmp_tcp_quote(&msg, source, dest, 40000, 443)
-        .expect("quote must match");
+    let matched =
+        tcp_raw::parse_icmp_tcp_quote(&msg, source, dest, 40000, 443).expect("quote must match");
     assert_eq!(matched.icmp_type, 3);
     assert_eq!(matched.icmp_code, 4);
     assert_eq!(matched.next_hop_mtu, Some(1400));
@@ -684,9 +675,9 @@ fn tcp_syn_ack_matches_ack_of_syn_and_syn_plus_payload() {
     let seq = 1000u32;
     let packet_size = 64u16; // payload 24
     // SYN-ACK acknowledging just the SYN.
-    let resp = traceroute_tcp::parse_tcp_segment(&synth_tcp_response(443, 40000, seq + 1, 0x12))
-        .expect("parse");
-    assert!(traceroute_tcp::tcp_response_matches_probe(
+    let resp =
+        tcp_raw::parse_tcp_segment(&synth_tcp_response(443, 40000, seq + 1, 0x12)).expect("parse");
+    assert!(tcp_raw::tcp_response_matches_probe(
         &resp,
         443,
         40000,
@@ -695,11 +686,10 @@ fn tcp_syn_ack_matches_ack_of_syn_and_syn_plus_payload() {
     ));
 
     // SYN-ACK acknowledging SYN + payload.
-    let payload = traceroute_tcp::payload_len_for(packet_size) as u32;
-    let resp =
-        traceroute_tcp::parse_tcp_segment(&synth_tcp_response(443, 40000, seq + 1 + payload, 0x12))
-            .expect("parse");
-    assert!(traceroute_tcp::tcp_response_matches_probe(
+    let payload = tcp_raw::payload_len_for(packet_size) as u32;
+    let resp = tcp_raw::parse_tcp_segment(&synth_tcp_response(443, 40000, seq + 1 + payload, 0x12))
+        .expect("parse");
+    assert!(tcp_raw::tcp_response_matches_probe(
         &resp,
         443,
         40000,
@@ -712,12 +702,12 @@ fn tcp_syn_ack_matches_ack_of_syn_and_syn_plus_payload() {
 fn tcp_syn_ack_matches_partial_payload_ack() {
     let seq = 1000u32;
     let packet_size = 64u16;
-    let partial_payload = traceroute_tcp::payload_len_for(packet_size) as u32 / 2;
+    let partial_payload = tcp_raw::payload_len_for(packet_size) as u32 / 2;
     let ack = seq.wrapping_add(1 + partial_payload);
-    let resp = traceroute_tcp::parse_tcp_segment(&synth_tcp_response(443, 40000, ack, 0x12))
-        .expect("parse");
+    let resp =
+        tcp_raw::parse_tcp_segment(&synth_tcp_response(443, 40000, ack, 0x12)).expect("parse");
 
-    assert!(traceroute_tcp::tcp_response_matches_probe(
+    assert!(tcp_raw::tcp_response_matches_probe(
         &resp,
         443,
         40000,
@@ -731,10 +721,10 @@ fn tcp_syn_ack_matches_partial_payload_ack_across_sequence_wrap() {
     let seq = u32::MAX - 5;
     let packet_size = 64u16;
     let ack = seq.wrapping_add(13);
-    let resp = traceroute_tcp::parse_tcp_segment(&synth_tcp_response(443, 40000, ack, 0x12))
-        .expect("parse");
+    let resp =
+        tcp_raw::parse_tcp_segment(&synth_tcp_response(443, 40000, ack, 0x12)).expect("parse");
 
-    assert!(traceroute_tcp::tcp_response_matches_probe(
+    assert!(tcp_raw::tcp_response_matches_probe(
         &resp,
         443,
         40000,
@@ -747,21 +737,20 @@ fn tcp_syn_ack_matches_partial_payload_ack_across_sequence_wrap() {
 fn tcp_rst_ack_matches_when_ack_covers_syn() {
     let seq = 2000u32;
     // RST+ACK from a closed port acknowledging our SYN (flags = RST|ACK = 0x14).
-    let resp = traceroute_tcp::parse_tcp_segment(&synth_tcp_response(443, 40000, seq + 1, 0x14))
-        .expect("parse");
-    assert!(traceroute_tcp::tcp_response_matches_probe(
+    let resp =
+        tcp_raw::parse_tcp_segment(&synth_tcp_response(443, 40000, seq + 1, 0x14)).expect("parse");
+    assert!(tcp_raw::tcp_response_matches_probe(
         &resp, 443, 40000, seq, 64
     ));
 }
 
 #[test]
 fn tcp_bare_rst_is_not_attributable() {
-    let resp =
-        traceroute_tcp::parse_tcp_segment(&synth_tcp_response(443, 40000, 0, 0x04)).expect("parse");
+    let resp = tcp_raw::parse_tcp_segment(&synth_tcp_response(443, 40000, 0, 0x04)).expect("parse");
     // A bare RST (no ACK) carries no sequence link, so it must not be attributed
     // to any size — otherwise a size that never arrived could be marked reached,
     // hiding a genuine size-based route divergence.
-    assert!(!traceroute_tcp::tcp_response_matches_probe(
+    assert!(!tcp_raw::tcp_response_matches_probe(
         &resp, 443, 40000, 999, 64
     ));
 }
@@ -769,16 +758,15 @@ fn tcp_bare_rst_is_not_attributable() {
 #[test]
 fn tcp_response_rejects_wrong_ports_and_wrong_ack() {
     // Wrong ports.
-    let resp = traceroute_tcp::parse_tcp_segment(&synth_tcp_response(80, 40000, 1001, 0x12))
-        .expect("parse");
-    assert!(!traceroute_tcp::tcp_response_matches_probe(
+    let resp =
+        tcp_raw::parse_tcp_segment(&synth_tcp_response(80, 40000, 1001, 0x12)).expect("parse");
+    assert!(!tcp_raw::tcp_response_matches_probe(
         &resp, 443, 40000, 1000, 64
     ));
 
     // SYN-ACK with an unrelated ACK number.
-    let resp =
-        traceroute_tcp::parse_tcp_segment(&synth_tcp_response(443, 40000, 5, 0x12)).expect("parse");
-    assert!(!traceroute_tcp::tcp_response_matches_probe(
+    let resp = tcp_raw::parse_tcp_segment(&synth_tcp_response(443, 40000, 5, 0x12)).expect("parse");
+    assert!(!tcp_raw::tcp_response_matches_probe(
         &resp, 443, 40000, 1000, 64
     ));
 }
@@ -786,9 +774,9 @@ fn tcp_response_rejects_wrong_ports_and_wrong_ack() {
 #[test]
 fn emsgsize_is_recognized_as_packet_too_large() {
     let too_large = std::io::Error::from_raw_os_error(libc::EMSGSIZE);
-    assert!(traceroute_tcp::is_message_too_long(&too_large));
+    assert!(tcp_raw::is_message_too_long(&too_large));
     let other = std::io::Error::from_raw_os_error(libc::ECONNREFUSED);
-    assert!(!traceroute_tcp::is_message_too_long(&other));
+    assert!(!tcp_raw::is_message_too_long(&other));
 }
 
 #[test]
@@ -804,24 +792,24 @@ fn tcp_ack_does_not_collide_across_sizes() {
     let seq_large = traceroute_tcp::derive_sequence(nonce, ttl, 1);
 
     // The small size's "SYN + payload" ACK must match the small size only.
-    let ack_small = seq_small.wrapping_add(1 + traceroute_tcp::payload_len_for(small) as u32);
-    let resp = traceroute_tcp::parse_tcp_segment(&synth_tcp_response(443, 40000, ack_small, 0x12))
+    let ack_small = seq_small.wrapping_add(1 + tcp_raw::payload_len_for(small) as u32);
+    let resp = tcp_raw::parse_tcp_segment(&synth_tcp_response(443, 40000, ack_small, 0x12))
         .expect("parse");
-    assert!(traceroute_tcp::tcp_response_matches_probe(
+    assert!(tcp_raw::tcp_response_matches_probe(
         &resp, 443, 40000, seq_small, small
     ));
-    assert!(!traceroute_tcp::tcp_response_matches_probe(
+    assert!(!tcp_raw::tcp_response_matches_probe(
         &resp, 443, 40000, seq_large, large
     ));
 
     // The large size's SYN ACK must match the large size only.
     let ack_large = seq_large.wrapping_add(1);
-    let resp2 = traceroute_tcp::parse_tcp_segment(&synth_tcp_response(443, 40000, ack_large, 0x12))
+    let resp2 = tcp_raw::parse_tcp_segment(&synth_tcp_response(443, 40000, ack_large, 0x12))
         .expect("parse");
-    assert!(traceroute_tcp::tcp_response_matches_probe(
+    assert!(tcp_raw::tcp_response_matches_probe(
         &resp2, 443, 40000, seq_large, large
     ));
-    assert!(!traceroute_tcp::tcp_response_matches_probe(
+    assert!(!tcp_raw::tcp_response_matches_probe(
         &resp2, 443, 40000, seq_small, small
     ));
 }
@@ -835,24 +823,24 @@ fn tcp_target_retry_ack_does_not_match_paired_probes() {
     let paired_large = traceroute_tcp::derive_sequence(nonce, ttl, 1);
     let retry_large = traceroute_tcp::derive_retry_sequence(nonce, ttl, 1);
     let retry_ack = retry_large.wrapping_add(700);
-    let resp = traceroute_tcp::parse_tcp_segment(&synth_tcp_response(443, 40000, retry_ack, 0x12))
+    let resp = tcp_raw::parse_tcp_segment(&synth_tcp_response(443, 40000, retry_ack, 0x12))
         .expect("parse");
 
-    assert!(traceroute_tcp::tcp_response_matches_probe(
+    assert!(tcp_raw::tcp_response_matches_probe(
         &resp,
         443,
         40000,
         retry_large,
         packet_size
     ));
-    assert!(!traceroute_tcp::tcp_response_matches_probe(
+    assert!(!tcp_raw::tcp_response_matches_probe(
         &resp,
         443,
         40000,
         paired_small,
         64
     ));
-    assert!(!traceroute_tcp::tcp_response_matches_probe(
+    assert!(!tcp_raw::tcp_response_matches_probe(
         &resp,
         443,
         40000,
@@ -1219,7 +1207,7 @@ fn v2_extra_matches_schema() {
 /// Minimal cBPF interpreter covering exactly the opcodes used by
 /// `tcp_probe_filter`, so the filter's accept/drop behavior is testable off
 /// Linux. Return semantics match the kernel: 0 drops, non-zero accepts.
-fn run_cbpf(prog: &[traceroute_tcp::FilterInsn], pkt: &[u8]) -> u32 {
+fn run_cbpf(prog: &[tcp_raw::FilterInsn], pkt: &[u8]) -> u32 {
     let be16 = |off: usize| u16::from_be_bytes([pkt[off], pkt[off + 1]]) as u32;
     let mut a: u32 = 0;
     let mut x: u32 = 0;
@@ -1267,7 +1255,7 @@ fn synth_ipv4_tcp(
 fn tcp_probe_filter_accepts_only_the_probe_tuple() {
     let target = Ipv4Addr::new(203, 0, 113, 10);
     let local = Ipv4Addr::new(192, 0, 2, 10);
-    let prog = traceroute_tcp::tcp_probe_filter(target, 443, 40000);
+    let prog = tcp_raw::tcp_probe_filter(target, 443, 40000);
 
     // The target's SYN-ACK to this round's tuple.
     assert!(run_cbpf(&prog, &synth_ipv4_tcp(target, local, 5, 0, 443, 40000)) > 0);
@@ -1301,7 +1289,7 @@ fn tcp_probe_filter_accepts_only_the_probe_tuple() {
 
 #[test]
 fn tcp_probe_filter_jumps_stay_in_bounds() {
-    let prog = traceroute_tcp::tcp_probe_filter(Ipv4Addr::new(1, 2, 3, 4), 1, 2);
+    let prog = tcp_raw::tcp_probe_filter(Ipv4Addr::new(1, 2, 3, 4), 1, 2);
     for (i, insn) in prog.iter().enumerate() {
         // 0x15 = JEQ, 0x45 = JSET; the other opcodes here ignore jt/jf.
         if insn.code != 0x15 && insn.code != 0x45 {
@@ -1313,6 +1301,172 @@ fn tcp_probe_filter_jumps_stay_in_bounds() {
                 dest < prog.len(),
                 "jump from {i} lands at {dest}, out of bounds"
             );
+        }
+    }
+}
+
+#[test]
+fn tcp_packet_size_presets_are_optional_and_strict() {
+    for packet_size in [40, 1200] {
+        let task = base_task(
+            ProbeTaskKind::Tcp,
+            serde_json::json!({"host":"example.com","port":443,"packetSize":packet_size}),
+        );
+        assert!(matches!(parse_task(&task).unwrap().target,
+            ProbeTarget::Tcp { packet_size: Some(size), .. } if size == packet_size));
+    }
+    for value in [
+        serde_json::json!(44),
+        serde_json::json!(0),
+        serde_json::json!(1200.5),
+        serde_json::json!("40"),
+        Value::Null,
+    ] {
+        let task = base_task(
+            ProbeTaskKind::Tcp,
+            serde_json::json!({"host":"example.com","port":443,"packetSize":value}),
+        );
+        assert!(parse_task(&task).is_err());
+    }
+    let task = base_task(
+        ProbeTaskKind::Tcp,
+        serde_json::json!({"host":"::1","port":443}),
+    );
+    assert!(matches!(
+        parse_task(&task).unwrap().target,
+        ProbeTarget::Tcp {
+            packet_size: None,
+            ..
+        }
+    ));
+    let sized = base_task(
+        ProbeTaskKind::Tcp,
+        serde_json::json!({"host":"::1","port":443,"packetSize":40}),
+    );
+    assert!(parse_task(&sized).is_err());
+}
+
+#[tokio::test]
+async fn tcp_packet_size_resolver_rejects_ipv6_without_changing_default_mode() {
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(1);
+    assert!(resolve_tcp_addrs("::1", 443, false, deadline).await.is_ok());
+    assert!(resolve_tcp_addrs("::1", 443, true, deadline).await.is_err());
+}
+
+#[tokio::test]
+#[cfg(not(target_os = "linux"))]
+async fn tcp_packet_size_does_not_fall_back_on_unsupported_platforms() {
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(1);
+    let result = super::tcp::probe("127.0.0.1", 443, Some(40), deadline)
+        .await
+        .into_result_body("test".into(), 0);
+    assert_eq!(result.error.as_deref(), Some("unsupported_platform"));
+}
+
+#[tokio::test]
+async fn ordinary_tcp_still_connects_to_local_listener() {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(1);
+    let result = super::tcp::probe(
+        "127.0.0.1",
+        listener.local_addr().unwrap().port(),
+        None,
+        deadline,
+    )
+    .await
+    .into_result_body("test".into(), 0);
+    assert!(result.ok);
+    assert!(result.extra.is_none());
+}
+
+#[tokio::test]
+#[cfg(target_os = "linux")]
+#[ignore = "requires Linux and CAP_NET_RAW or root"]
+async fn tcp_packet_size_linux_wire_and_endpoint_smoke() {
+    use super::raw_socket::async_recv_from;
+    use socket2::Protocol;
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    // Observe the kernel-produced IPv4 packet, independently of the SYN builder.
+    let tap =
+        tokio::io::unix::AsyncFd::new(tcp_raw::create_raw_socket(Protocol::TCP).unwrap()).unwrap();
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(3);
+    let (small, large) = tokio::join!(
+        super::tcp::probe("127.0.0.1", addr.port(), Some(40), deadline),
+        super::tcp::probe("127.0.0.1", addr.port(), Some(1200), deadline),
+    );
+    for (outcome, size) in [(small, 40), (large, 1200)] {
+        let result = outcome.into_result_body("test".into(), 0);
+        assert!(result.ok, "SYN must reach an open port: {:?}", result.error);
+        assert_eq!(
+            result.extra,
+            Some(serde_json::json!({"kind": "tcp", "packet_size_bytes": size}))
+        );
+    }
+    let mut sizes = std::collections::HashSet::new();
+    let mut source_ports = std::collections::HashSet::new();
+    let mut buf = [0u8; 2048];
+    while sizes.len() < 2 {
+        let (len, _) = tokio::time::timeout_at(deadline, async_recv_from(&tap, &mut buf))
+            .await
+            .unwrap()
+            .unwrap();
+        let ihl = (buf[0] & 15) as usize * 4;
+        if len < ihl + 20
+            || u16::from_be_bytes([buf[ihl + 2], buf[ihl + 3]]) != addr.port()
+            || buf[ihl + 13] != 0x02
+        {
+            continue;
+        }
+        let total_len = u16::from_be_bytes([buf[2], buf[3]]);
+        assert!(matches!(total_len, 40 | 1200));
+        assert_eq!(len, total_len as usize);
+        assert_eq!(u16::from_be_bytes([buf[6], buf[7]]) & 0x4000, 0x4000);
+        assert_eq!(
+            tcp_raw::tcp_checksum(Ipv4Addr::LOCALHOST, Ipv4Addr::LOCALHOST, &buf[ihl..len]),
+            0
+        );
+        sizes.insert(total_len);
+        source_ports.insert(u16::from_be_bytes([buf[ihl], buf[ihl + 1]]));
+    }
+    assert_eq!(
+        source_ports.len(),
+        2,
+        "concurrent probes must reserve distinct ports"
+    );
+    drop(listener);
+    let result = super::tcp::probe("127.0.0.1", addr.port(), Some(40), deadline)
+        .await
+        .into_result_body("test".into(), 0);
+    assert_eq!(result.error.as_deref(), Some("connection_refused"));
+    let extra = result.extra.unwrap();
+    assert_eq!(extra["packet_size_bytes"], 40);
+    assert_eq!(extra["last_error"]["kind"], "connection_refused");
+    assert!(extra.get("probe_style").is_none());
+}
+
+#[tokio::test]
+async fn tcp_packet_metadata_covers_early_failures_without_overwriting_diagnostics() {
+    for (host, deadline) in [
+        ("127.0.0.1", tokio::time::Instant::now()),
+        ("::1", tokio::time::Instant::now() + Duration::from_secs(1)),
+    ] {
+        let result = super::tcp::probe(host, 443, Some(1200), deadline)
+            .await
+            .into_result_body("test".into(), 0);
+        assert!(!result.ok);
+        let extra = result.extra.unwrap();
+        assert_eq!(extra["packet_size_bytes"], 1200);
+        assert_eq!(extra["kind"], "tcp");
+        assert!(extra.get("probe_style").is_none());
+        if cfg!(target_os = "linux") {
+            assert_eq!(extra["host"], host);
+            assert_eq!(
+                extra["last_error"]["kind"].as_str(),
+                result.error.as_deref()
+            );
+        } else {
+            assert_eq!(result.error.as_deref(), Some("unsupported_platform"));
         }
     }
 }

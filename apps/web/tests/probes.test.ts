@@ -22,6 +22,12 @@ describe("formatProbeTarget", () => {
     expect(formatProbeTarget("tcp", { host: "example.com", port: 443 })).toBe("example.com:443");
   });
 
+  test.each([40, 1200] as const)("labels the configured TCP packet size %p", (packetSize) => {
+    expect(formatProbeTarget("tcp", { host: "example.com", port: 443, packetSize })).toBe(
+      `example.com:443 · ${packetSize}B`,
+    );
+  });
+
   test("formats an http target as the url", () => {
     expect(formatProbeTarget("http", { url: "https://example.com/healthz" })).toBe(
       "https://example.com/healthz",

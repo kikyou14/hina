@@ -328,6 +328,23 @@
     "agentCount": "{{count}} agents"
   },
   "probes": {
+    "tcpResult": {
+      "latest": "Latest probe",
+      "success": "Success",
+      "failed": "Failed",
+      "errors": {
+        "timeout": "Timed out",
+        "connection_refused": "Connection refused",
+        "permission_denied": "Blocked by permissions or network policy",
+        "connect_failed": "Connection failed",
+        "packet_too_large": "Packet exceeds the permitted MTU",
+        "dest_unreachable": "Destination unreachable",
+        "ipv6_not_supported": "No supported IPv4 target",
+        "unsupported_platform": "Unsupported agent platform",
+        "dns_lookup_failed": "DNS lookup failed",
+        "dns_no_records": "No DNS records"
+      }
+    },
     "title": "Probe Tasks",
     "createTask": "Create task",
     "createDialog": {
@@ -351,11 +368,18 @@
     },
     "tcpUnsupported": {
       "someLabel": "{{unsupported}}/{{total}} unsupported",
-      "someTitle": "{{unsupported}} of {{total}} target agents don't support TCP size comparison and will skip this task.",
+      "someTitle": "{{unsupported}} of {{total}} target agents don't support this TCP probe mode and will skip this task.",
       "noneLabel": "No agent support",
-      "noneTitle": "None of the {{total}} target agents support TCP size comparison, so this task runs nowhere until a supporting agent connects."
+      "noneTitle": "None of the {{total}} target agents support this TCP probe mode, so this task runs nowhere until a supporting agent connects."
     },
     "form": {
+      "tcpPacketSize": "TCP probe mode",
+      "tcpSystemConnect": "System connection (default)",
+      "tcpSmallPacket": "Small packet · 40B",
+      "tcpLargePacket": "Large packet · 1200B",
+      "tcpPacketSizeHint": "Fixed packet sizes measure SYN response time. Linux and IPv4 only; sizes include IP and TCP headers. The agent needs raw socket permission.",
+      "tcpPacketSizeSupport": "{{supported}} of {{total}} selected agents support fixed packet sizes. Unsupported agents skip these tasks.",
+      "tcpPacketSizeIpv4Only": "Fixed TCP packet sizes require an IPv4 address or a hostname with an IPv4 record.",
       "intervalSec": "Interval (sec)",
       "timeoutMs": "Timeout (ms)",
       "target": "Target",

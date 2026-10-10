@@ -125,3 +125,21 @@ describe("parseTarget traceroute — TCP dual-size mode", () => {
     expect(result!.target).not.toHaveProperty("dontFragment");
   });
 });
+
+describe("parseTarget TCP packet size", () => {
+  test.each([40, 1200])("round-trips preset %p", (packetSize) => {
+    const target = { host: "example.com", port: 443, packetSize };
+    expect(parseTarget("tcp", target)?.target).toEqual(target);
+    expect(JSON.parse(parseTarget("tcp", target)!.targetJson)).toEqual(target);
+  });
+
+  test.each([44, 0, 1200.5, "40", null])("rejects invalid preset %p", (packetSize) => {
+    expect(parseTarget("tcp", { host: "example.com", port: 443, packetSize })).toBeNull();
+  });
+
+  test("preserves ordinary IPv6 TCP while rejecting sized IPv6", () => {
+    const target = { host: "::1", port: 443 };
+    expect(parseTarget("tcp", target)?.target).toEqual(target);
+    expect(parseTarget("tcp", { ...target, packetSize: 40 })).toBeNull();
+  });
+});

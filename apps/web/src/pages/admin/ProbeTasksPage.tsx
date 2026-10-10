@@ -90,7 +90,7 @@ function ProbeScope({ task: tsk }: { task: AdminProbeTask }) {
 
 function ProbeTcpUnsupportedWarning({ task: tsk }: { task: AdminProbeTask }) {
   const { t } = useTranslation();
-  const support = tsk.tcpSizePairSupport;
+  const support = tsk.tcpSizePairSupport ?? tsk.tcpPacketSizeSupport;
   if (!support || support.unsupportedAgents === 0) return null;
 
   const runsNowhere = support.targetAgents - support.unsupportedAgents === 0;

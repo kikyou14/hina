@@ -8,10 +8,14 @@ import * as schema from "../db/schema";
 import { getMigrationsFolder } from "../paths";
 import {
   buildProbeConfigForAgent,
-  capabilitySupportsTracerouteTcpSizePair,
-  computeTracerouteTcpSupportCounts,
+  computeTcpProbeSupportCounts,
   fetchAgentProbeScope,
 } from "./probe-config";
+
+import {
+  capabilitySupportsTcpPacketSize,
+  capabilitySupportsTracerouteTcpSizePair,
+} from "../util/probe-capabilities";
 
 const NOW_MS = 1_700_000_000_000;
 
@@ -228,7 +232,7 @@ describe("buildProbeConfigForAgent — TCP dual-size traceroute capability gatin
   });
 });
 
-describe("computeTracerouteTcpSupportCounts", () => {
+describe("computeTcpProbeSupportCounts", () => {
   let db: DbClient;
   let sqlite: Database;
 
@@ -289,7 +293,7 @@ describe("computeTracerouteTcpSupportCounts", () => {
     await seedAgentWithCap("a2", null, false);
     await seedAgentWithCap("a3", null, false);
 
-    const counts = await computeTracerouteTcpSupportCounts(db, [
+    const counts = await computeTcpProbeSupportCounts(db, [
       { id: "t-all", kind: "traceroute", targetJson: TCP_TARGET_JSON, allAgents: true },
     ]);
 
@@ -306,7 +310,7 @@ describe("computeTracerouteTcpSupportCounts", () => {
       createdAtMs: NOW_MS,
     });
 
-    const counts = await computeTracerouteTcpSupportCounts(db, [
+    const counts = await computeTcpProbeSupportCounts(db, [
       { id: "t-scoped", kind: "traceroute", targetJson: TCP_TARGET_JSON, allAgents: false },
     ]);
 
@@ -326,7 +330,7 @@ describe("computeTracerouteTcpSupportCounts", () => {
       createdAtMs: NOW_MS,
     });
 
-    const counts = await computeTracerouteTcpSupportCounts(db, [
+    const counts = await computeTcpProbeSupportCounts(db, [
       { id: "t-group", kind: "traceroute", targetJson: TCP_TARGET_JSON, allAgents: false },
     ]);
 
@@ -336,7 +340,7 @@ describe("computeTracerouteTcpSupportCounts", () => {
   test("omits non-TCP traceroute tasks and other probe kinds", async () => {
     await seedAgentWithCap("a1", null, false);
 
-    const counts = await computeTracerouteTcpSupportCounts(db, [
+    const counts = await computeTcpProbeSupportCounts(db, [
       {
         id: "icmp",
         kind: "traceroute",
@@ -355,7 +359,85 @@ describe("computeTracerouteTcpSupportCounts", () => {
   });
 
   test("returns an empty map when no TCP dual-size tasks are present", async () => {
-    const counts = await computeTracerouteTcpSupportCounts(db, []);
+    const counts = await computeTcpProbeSupportCounts(db, []);
     expect(counts.size).toBe(0);
+  });
+});
+
+describe("TCP fixed packet size capability", () => {
+  test("requires its own exact capability, not traceroute support", () => {
+    expect(capabilitySupportsTcpPacketSize({ probes: { tcp: { packetSize: true } } })).toBe(true);
+    for (const cap of [
+      null,
+      {},
+      { probes: { traceroute: { tcpSizePair: true } } },
+      { probes: { tcp: { packetSize: "true" } } },
+    ]) {
+      expect(capabilitySupportsTcpPacketSize(cap)).toBe(false);
+    }
+  });
+
+  test("filters unsupported tasks and counts mixed groups using the separate capability", async () => {
+    const { db, sqlite } = createTestDb();
+    try {
+      await seedGroup(db, "g1", "group-1");
+      await seedAgent(db, "linux", "g1");
+      await seedAgent(db, "old-linux", "g1");
+      for (const [id, cap] of [
+        ["linux", { probes: { tcp: { packetSize: true } } }],
+        ["old-linux", { probes: { traceroute: { tcpSizePair: true } } }],
+      ] as const) {
+        await db
+          .insert(schema.agentStatus)
+          .values({ agentId: id, lastCapabilitiesJson: JSON.stringify(cap), updatedAtMs: NOW_MS });
+      }
+      await seedAllAgentsTask(db, "normal", "tcp", { host: "::1", port: 443 });
+      await seedAllAgentsTask(db, "sized", "tcp", {
+        host: "example.com",
+        port: 443,
+        packetSize: 1200,
+      });
+      await db
+        .update(schema.probeTask)
+        .set({ allAgents: false })
+        .where(eq(schema.probeTask.id, "sized"));
+      await db
+        .insert(schema.probeTaskGroup)
+        .values({ taskId: "sized", groupId: "g1", createdAtMs: NOW_MS });
+      await db
+        .insert(schema.probeTaskAgent)
+        .values({ taskId: "sized", agentId: "linux", createdAtMs: NOW_MS });
+      const scope = { agentId: "linux", groupId: "g1" };
+      for (const supportsTcpPacketSize of [false, undefined]) {
+        const result = await buildProbeConfigForAgent(db, "linux", {
+          scope,
+          rev: 1,
+          supportsTracerouteTcpSizePair: true,
+          supportsTcpPacketSize,
+        });
+        expect(result.tasks.map((task) => task.id)).toEqual(["normal"]);
+      }
+      const supported = await buildProbeConfigForAgent(db, "linux", {
+        scope,
+        rev: 2,
+        supportsTcpPacketSize: true,
+      });
+      expect(supported.tasks.find((task) => task.id === "sized")?.tar).toEqual({
+        host: "example.com",
+        port: 443,
+        packetSize: 1200,
+      });
+      const counts = await computeTcpProbeSupportCounts(db, [
+        {
+          id: "sized",
+          kind: "tcp",
+          targetJson: JSON.stringify({ host: "example.com", port: 443, packetSize: 1200 }),
+          allAgents: false,
+        },
+      ]);
+      expect(counts.get("sized")).toEqual({ targetAgents: 2, unsupportedAgents: 1 });
+    } finally {
+      sqlite.close();
+    }
   });
 });

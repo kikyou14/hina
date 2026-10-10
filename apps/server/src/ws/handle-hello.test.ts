@@ -118,6 +118,31 @@ describe("handleHello defers registry update until DB commit succeeds", () => {
     sqlite.close();
   });
 
+  test("captures fixed TCP capability before pushing configuration and clears it on reconnect", async () => {
+    await seedAgent(db, "a1", "tok-a1");
+    await registry.load();
+    for (const supported of [true, false]) {
+      const ws = makeFakeWs();
+      let pushed = false;
+      await handleHello(
+        ws,
+        { tok: "tok-a1", cap: supported ? { probes: { tcp: { packetSize: true } } } : {} },
+        Date.now(),
+        {
+          ...deps,
+          pushProbeConfig: async () => {
+            expect(ws.data.supportsTcpPacketSize).toBe(supported);
+            pushed = true;
+            return true;
+          },
+        },
+      );
+      await waitForBackgroundTasks();
+      expect(pushed).toBe(true);
+      expect(registry.listOptionRefs()[0]?.tcpPacketSizeSupported).toBe(supported);
+    }
+  });
+
   test("registry only reflects HELLO metadata after the writer tx commits", async () => {
     await seedAgent(db, "a1", "tok-a1");
     await registry.load();

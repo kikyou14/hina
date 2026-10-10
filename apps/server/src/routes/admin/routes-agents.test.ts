@@ -575,3 +575,51 @@ describe("group prune hooks fire from probe and alert routes", () => {
     expect(await hasGroup(db, "g-drop")).toBe(false);
   });
 });
+
+test("TCP packet size survives create, edit and list, and can return to ordinary connect", async () => {
+  const { db, sqlite } = createTestDb();
+  try {
+    const app = new Hono<AppContext>();
+    app.use(async (c, next) => {
+      c.set("db", db);
+      await next();
+    });
+    registerAdminProbeTaskRoutes(app);
+    const create = await app.request("/probe-tasks", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        name: "TCP test",
+        kind: "tcp",
+        allAgents: true,
+        intervalSec: 60,
+        target: { host: "example.com", port: 443, packetSize: 40 },
+      }),
+    });
+    expect(create.status).toBe(200);
+    const { id } = (await create.json()) as { id: string };
+    for (const packetSize of [40, 1200, undefined]) {
+      const target = {
+        host: "example.com",
+        port: 443,
+        ...(packetSize === undefined ? {} : { packetSize }),
+      };
+      const update = await app.request(`/probe-tasks/${id}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ target }),
+      });
+      expect(update.status).toBe(200);
+      const listing = await app.request("/probe-tasks");
+      const body = (await listing.json()) as {
+        tasks: Array<{ target: unknown; tcpPacketSizeSupport: unknown }>;
+      };
+      expect(body.tasks[0]?.target).toEqual(target);
+      expect(body.tasks[0]?.tcpPacketSizeSupport).toEqual(
+        packetSize === undefined ? null : { targetAgents: 0, unsupportedAgents: 0 },
+      );
+    }
+  } finally {
+    sqlite.close();
+  }
+});

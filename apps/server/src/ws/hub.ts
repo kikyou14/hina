@@ -61,6 +61,7 @@ export type AgentWsData = {
   probeTaskIds?: Set<string>;
   tracerouteTaskIds?: Set<string>;
   supportsTracerouteTcpSizePair?: boolean;
+  supportsTcpPacketSize?: boolean;
   authed: boolean;
   rateLimit: RateLimitState;
   helloTimer?: ReturnType<typeof setTimeout>;
@@ -222,6 +223,7 @@ export function createWsHub(deps: {
         scope,
         rev: nextProbeConfigRev(),
         supportsTracerouteTcpSizePair: ws.data.supportsTracerouteTcpSizePair,
+        supportsTcpPacketSize: ws.data.supportsTcpPacketSize,
       });
       ws.data.probeTaskIds = new Set(body.tasks.map((t) => t.id));
       ws.data.tracerouteTaskIds = new Set(

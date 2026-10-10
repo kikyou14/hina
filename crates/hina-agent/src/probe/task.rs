@@ -17,10 +17,21 @@ pub(crate) enum TracerouteMode {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum ProbeTarget {
-    Icmp { host: String },
-    Tcp { host: String, port: u16 },
-    Http { url: Url },
-    Traceroute { host: String, mode: TracerouteMode },
+    Icmp {
+        host: String,
+    },
+    Tcp {
+        host: String,
+        port: u16,
+        packet_size: Option<u16>,
+    },
+    Http {
+        url: Url,
+    },
+    Traceroute {
+        host: String,
+        mode: TracerouteMode,
+    },
 }
 
 pub(crate) const TRACEROUTE_TCP_MIN_PACKET_SIZE: u16 = 40;
@@ -110,7 +121,21 @@ pub(crate) fn parse_task(task: &ProbeTaskWire) -> anyhow::Result<ProbeTaskSpec> 
             if port == 0 {
                 anyhow::bail!("invalid target.port");
             }
-            ProbeTarget::Tcp { host, port }
+            let packet_size = match task.target.get("packetSize") {
+                None => None,
+                Some(value) => match value.as_u64() {
+                    Some(size @ (40 | 1200)) => Some(size as u16),
+                    _ => anyhow::bail!("target.packetSize must be 40 or 1200"),
+                },
+            };
+            if packet_size.is_some() && host.parse::<std::net::Ipv6Addr>().is_ok() {
+                anyhow::bail!("TCP packet size probes require IPv4");
+            }
+            ProbeTarget::Tcp {
+                host,
+                port,
+                packet_size,
+            }
         }
         ProbeTaskKind::Http => {
             let url_str = task
