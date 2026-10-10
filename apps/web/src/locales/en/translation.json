@@ -328,23 +328,6 @@
     "agentCount": "{{count}} agents"
   },
   "probes": {
-    "tcpResult": {
-      "latest": "Latest probe",
-      "success": "Success",
-      "failed": "Failed",
-      "errors": {
-        "timeout": "Timed out",
-        "connection_refused": "Connection refused",
-        "permission_denied": "Blocked by permissions or network policy",
-        "connect_failed": "Connection failed",
-        "packet_too_large": "Packet exceeds the permitted MTU",
-        "dest_unreachable": "Destination unreachable",
-        "ipv6_not_supported": "No supported IPv4 target",
-        "unsupported_platform": "Unsupported agent platform",
-        "dns_lookup_failed": "DNS lookup failed",
-        "dns_no_records": "No DNS records"
-      }
-    },
     "title": "Probe Tasks",
     "createTask": "Create task",
     "createDialog": {
