@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { keepPreviousData, useQuery } from "@tanstack/react-query";
 
 import { getAdminAgent, getAdminAgentOptions, getAdminAgents } from "@/api/adminAgents";
 
@@ -9,6 +9,8 @@ export function useAdminAgents(
     queryKey: ["admin", "agents", query],
     queryFn: () => getAdminAgents(query),
     staleTime: 10_000,
+    // Keep the current rows on screen while a new filter or page loads.
+    placeholderData: keepPreviousData,
   });
 }
 

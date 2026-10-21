@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
 import { useAdminMe } from "@/queries/admin";
+import { AdminPageHeader } from "./components/AdminPageHeader";
 import { PasswordSection } from "./components/PasswordSection";
 import { UsernameSection } from "./components/UsernameSection";
 
@@ -51,9 +52,7 @@ export function AccountPage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <div className="text-lg font-semibold">{t("account.title")}</div>
-      </div>
+      <AdminPageHeader title={t("account.title")} />
       <UsernameSection />
       <PasswordSection />
     </div>

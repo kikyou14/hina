@@ -7,22 +7,17 @@ import { LOGIN_ATTEMPT_REASONS, getAdminLoginAudit } from "@/api/adminAudit";
 import { useSiteConfig } from "@/components/SiteConfigProvider";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Skeleton } from "@/components/ui/skeleton";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
 import { formatIsoShort } from "@/lib/time";
 import { getUserErrorMessage } from "@/lib/userErrors";
-import { cn } from "@/lib/utils";
+import { AdminFilterTabs, AdminList, AdminListRow } from "./components/AdminList";
+import { AdminPageHeader } from "./components/AdminPageHeader";
+
+// Tracks: time, result, reason, username, IP.
+const AUDIT_GRID = "@2xl/list:grid-cols-[8rem_5rem_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)]";
 
 type FilterValue = "all" | "failures";
 
@@ -58,188 +53,112 @@ export function AuditLoginsPage() {
     setOffset(0);
   };
 
+  const filterItems = [
+    { value: "all", label: t("audit.logins.filter.all") },
+    { value: "failures", label: t("audit.logins.filter.failures") },
+  ] as const;
+
+  const logs = audit.data?.logs ?? [];
+
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>{t("audit.logins.title")}</CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        <div className="flex flex-wrap items-center gap-3">
-          <FilterToggle
-            value={filter}
-            onChange={setFilterAndReset}
-            labels={{
-              all: t("audit.logins.filter.all"),
-              failures: t("audit.logins.filter.failures"),
-            }}
-          />
+    <div className="space-y-4">
+      <AdminPageHeader title={t("audit.logins.title")} />
 
-          <div className="flex items-center gap-2">
-            <Label htmlFor="audit-logins-limit" className="text-muted-foreground text-sm">
-              {t("audit.logins.limit")}
-            </Label>
-            <Input
-              id="audit-logins-limit"
-              type="number"
-              value={limit}
-              onChange={(e) => {
-                const next = clampInt(Number(e.target.value) || 50, 10, 200);
-                setLimit(next);
-                setOffset(0);
-              }}
-              className="w-28"
-            />
+      <Card>
+        <CardHeader>
+          <div className="flex flex-wrap items-center gap-3">
+            <AdminFilterTabs value={filter} onChange={setFilterAndReset} items={filterItems} />
+
+            <div className="flex items-center gap-2">
+              <Label htmlFor="audit-logins-limit" className="text-muted-foreground">
+                {t("audit.logins.limit")}
+              </Label>
+              <Input
+                id="audit-logins-limit"
+                type="number"
+                value={limit}
+                onChange={(e) => {
+                  const next = clampInt(Number(e.target.value) || 50, 10, 200);
+                  setLimit(next);
+                  setOffset(0);
+                }}
+                className="w-20"
+              />
+            </div>
+
+            <div className="ml-auto flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setOffset((v) => Math.max(0, v - limit))}
+                disabled={offset <= 0}
+              >
+                {t("audit.logins.prev")}
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setOffset((v) => v + limit)}
+                disabled={!audit.data?.hasMore}
+              >
+                {t("audit.logins.next")}
+              </Button>
+            </div>
           </div>
-
-          <div className="ml-auto flex items-center gap-2">
-            <Button
-              variant="outline"
-              onClick={() => setOffset((v) => Math.max(0, v - limit))}
-              disabled={offset <= 0}
+        </CardHeader>
+        <CardContent>
+          {audit.isError ? (
+            <div className="text-destructive text-sm" role="alert">
+              {getUserErrorMessage(audit.error, t, { action: "load" })}
+            </div>
+          ) : (
+            <AdminList
+              grid={AUDIT_GRID}
+              columns={[
+                t("audit.logins.table.time"),
+                t("audit.logins.table.result"),
+                t("audit.logins.table.reason"),
+                t("audit.logins.table.username"),
+                t("audit.logins.table.ip"),
+              ]}
+              count={logs.length}
+              loading={audit.isLoading}
+              empty={t("audit.logins.noLogs")}
             >
-              {t("audit.logins.prev")}
-            </Button>
-            <Button
-              variant="outline"
-              onClick={() => setOffset((v) => v + limit)}
-              disabled={!audit.data?.hasMore}
-            >
-              {t("audit.logins.next")}
-            </Button>
-          </div>
-        </div>
-
-        {audit.isError ? (
-          <div className="text-destructive text-sm" role="alert">
-            {getUserErrorMessage(audit.error, t, { action: "load" })}
-          </div>
-        ) : null}
-
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead className="w-48">{t("audit.logins.table.time")}</TableHead>
-              <TableHead className="w-26">{t("audit.logins.table.result")}</TableHead>
-              <TableHead>{t("audit.logins.table.reason")}</TableHead>
-              <TableHead>{t("audit.logins.table.username")}</TableHead>
-              <TableHead>{t("audit.logins.table.ip")}</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {audit.isLoading ? (
-              Array.from({ length: 5 }, (_, i) => (
-                <TableRow key={`sk-${i}`}>
-                  <TableCell>
-                    <Skeleton className="h-4 w-36" />
-                  </TableCell>
-                  <TableCell>
-                    <Skeleton className="h-5 w-16 rounded-full" />
-                  </TableCell>
-                  <TableCell>
-                    <Skeleton className="h-4 w-24" />
-                  </TableCell>
-                  <TableCell>
-                    <Skeleton className="h-4 w-20" />
-                  </TableCell>
-                  <TableCell>
-                    <Skeleton className="h-4 w-28" />
-                  </TableCell>
-                </TableRow>
-              ))
-            ) : audit.data && audit.data.logs.length > 0 ? (
-              audit.data.logs.map((row, idx) => {
-                const reasonKnown = KNOWN_REASONS.has(row.reason);
-                return (
-                  <TableRow
-                    key={`${row.tsMs}:${idx}`}
-                    title={row.userAgent ?? undefined}
-                    className={cn(
-                      "transition-colors",
-                      !row.success && "bg-destructive/5 hover:bg-destructive/10",
-                    )}
-                  >
-                    <TableCell className="font-mono text-xs whitespace-nowrap tabular-nums">
+              {logs.map((row, idx) => (
+                <AdminListRow
+                  key={`${row.tsMs}:${idx}`}
+                  grid={AUDIT_GRID}
+                  title={row.userAgent ?? undefined}
+                  className={row.success ? undefined : "bg-destructive/5"}
+                  primary={
+                    <span className="font-mono tabular-nums">
                       {formatIsoShort(row.tsMs, timezone)}
-                    </TableCell>
-                    <TableCell>
-                      <ResultBadge
-                        success={row.success}
-                        successLabel={t("audit.logins.result.success")}
-                        failureLabel={t("audit.logins.result.failure")}
-                      />
-                    </TableCell>
-                    <TableCell className="text-muted-foreground text-xs">
-                      {reasonKnown ? t(`audit.logins.reason.${row.reason}`) : "—"}
-                    </TableCell>
-                    <TableCell className="font-mono text-xs">
-                      {row.usernameAttempted ?? "—"}
-                    </TableCell>
-                    <TableCell className="font-mono text-xs">{row.ip ?? "—"}</TableCell>
-                  </TableRow>
-                );
-              })
-            ) : (
-              <TableRow>
-                <TableCell colSpan={5} className="text-muted-foreground py-8 text-center text-sm">
-                  {t("audit.logins.noLogs")}
-                </TableCell>
-              </TableRow>
-            )}
-          </TableBody>
-        </Table>
-      </CardContent>
-    </Card>
-  );
-}
-
-function FilterToggle({
-  value,
-  onChange,
-  labels,
-}: {
-  value: FilterValue;
-  onChange: (next: FilterValue) => void;
-  labels: { all: string; failures: string };
-}) {
-  return (
-    <div
-      role="group"
-      aria-label={labels.all + " / " + labels.failures}
-      className="bg-muted inline-flex items-center rounded-md p-0.5"
-    >
-      <FilterButton active={value === "all"} onClick={() => onChange("all")}>
-        {labels.all}
-      </FilterButton>
-      <FilterButton active={value === "failures"} onClick={() => onChange("failures")}>
-        {labels.failures}
-      </FilterButton>
+                    </span>
+                  }
+                  cells={[
+                    <ResultBadge
+                      success={row.success}
+                      successLabel={t("audit.logins.result.success")}
+                      failureLabel={t("audit.logins.result.failure")}
+                    />,
+                    KNOWN_REASONS.has(row.reason) ? (
+                      <span className="text-muted-foreground">
+                        {t(`audit.logins.reason.${row.reason}`)}
+                      </span>
+                    ) : null,
+                    row.usernameAttempted ? (
+                      <div className="font-mono break-all">{row.usernameAttempted}</div>
+                    ) : null,
+                    row.ip ? <div className="font-mono break-all">{row.ip}</div> : null,
+                  ]}
+                />
+              ))}
+            </AdminList>
+          )}
+        </CardContent>
+      </Card>
     </div>
-  );
-}
-
-function FilterButton({
-  active,
-  onClick,
-  children,
-}: {
-  active: boolean;
-  onClick: () => void;
-  children: React.ReactNode;
-}) {
-  return (
-    <button
-      type="button"
-      aria-pressed={active}
-      onClick={onClick}
-      className={cn(
-        "focus-visible:ring-ring rounded-sm px-3 py-1 text-sm transition-colors focus-visible:ring-2 focus-visible:outline-none",
-        active
-          ? "bg-background text-foreground shadow-sm"
-          : "text-muted-foreground hover:text-foreground",
-      )}
-    >
-      {children}
-    </button>
   );
 }
 

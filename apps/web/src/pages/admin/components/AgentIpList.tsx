@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 
 import type { AdminAgent } from "@/api/adminAgents";
+import { cn } from "@/lib/utils";
 import { getAgentIpEntries } from "../lib/agentEditHelpers";
 
 function truncateIpv6(ip: string): string {
@@ -10,10 +11,10 @@ function truncateIpv6(ip: string): string {
   return `${ip.slice(0, 8)}…${ip.slice(-4)}`;
 }
 
-export function AgentIpList(props: { status: AdminAgent["status"]; align?: "left" | "right" }) {
+export function AgentIpList(props: { status: AdminAgent["status"]; className?: string }) {
   const { t } = useTranslation();
   const entries = getAgentIpEntries(props.status);
-  if (entries.length === 0) return <span>-</span>;
+  if (entries.length === 0) return null;
 
   const copyIp = async (ip: string) => {
     try {
@@ -25,11 +26,7 @@ export function AgentIpList(props: { status: AdminAgent["status"]; align?: "left
   };
 
   return (
-    <div
-      className={
-        props.align === "right" ? "flex flex-col items-end gap-1 text-right" : "flex flex-col gap-1"
-      }
-    >
+    <div className={cn("flex flex-col gap-1", props.className)}>
       {entries.map((entry) => (
         <div key={`${entry.family}-${entry.value}`} className="flex max-w-full items-center gap-2">
           <span className="text-muted-foreground shrink-0 text-[10px] uppercase">

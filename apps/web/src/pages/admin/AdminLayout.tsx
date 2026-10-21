@@ -1,5 +1,14 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { LogOut } from "lucide-react";
+import {
+  Bell,
+  LogOut,
+  Radar,
+  Server,
+  Settings,
+  ShieldCheck,
+  UserRound,
+  type LucideIcon,
+} from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { Link, NavLink, Outlet, useNavigate } from "react-router-dom";
 
@@ -13,18 +22,28 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { useAdminLiveSync } from "@/live/admin";
 
-function NavItem({ to, label }: { to: string; label: string }) {
+const NAV_ITEMS: { to: string; labelKey: string; icon: LucideIcon }[] = [
+  { to: "/admin/agents", labelKey: "admin.nav.agents", icon: Server },
+  { to: "/admin/probes", labelKey: "admin.nav.probeTasks", icon: Radar },
+  { to: "/admin/alerts", labelKey: "admin.nav.alerts", icon: Bell },
+  { to: "/admin/audit/logins", labelKey: "admin.nav.auditLogins", icon: ShieldCheck },
+  { to: "/admin/account", labelKey: "admin.nav.account", icon: UserRound },
+  { to: "/admin/settings", labelKey: "admin.nav.settings", icon: Settings },
+];
+
+function NavItem({ to, label, icon: Icon }: { to: string; label: string; icon: LucideIcon }) {
   return (
     <NavLink
       to={to}
       className={({ isActive }) =>
         cn(
-          "hover:bg-accent hover:text-accent-foreground flex items-center rounded-md px-3 py-2 text-sm font-medium whitespace-nowrap",
+          "hover:bg-accent hover:text-accent-foreground flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium whitespace-nowrap",
           isActive ? "bg-accent text-accent-foreground" : "text-muted-foreground",
         )
       }
       end
     >
+      <Icon className="size-4 shrink-0" aria-hidden="true" />
       {label}
     </NavLink>
   );
@@ -36,6 +55,10 @@ export function AdminLayout() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const { status: liveStatus } = useAdminLiveSync();
+
+  const navItems = NAV_ITEMS.map((item) => (
+    <NavItem key={item.to} to={item.to} label={t(item.labelKey)} icon={item.icon} />
+  ));
 
   const logout = useMutation({
     mutationFn: adminLogout,
@@ -50,7 +73,7 @@ export function AdminLayout() {
       <ConnectionBanner status={liveStatus} />
       <header className="border-b">
         <div className="container flex h-14 items-center gap-6">
-          <Link to="/" className="font-semibold md:w-55 md:shrink-0">
+          <Link to="/" className="font-semibold lg:w-55 lg:shrink-0">
             {siteName}
           </Link>
           <div className="flex min-w-0 flex-1 items-center justify-end gap-2">
@@ -72,25 +95,15 @@ export function AdminLayout() {
         </div>
       </header>
 
-      <nav className="border-b md:hidden">
-        <div className="container flex gap-1 overflow-x-auto py-2">
-          <NavItem to="/admin/agents" label={t("admin.nav.agents")} />
-          <NavItem to="/admin/probes" label={t("admin.nav.probeTasks")} />
-          <NavItem to="/admin/alerts" label={t("admin.nav.alerts")} />
-          <NavItem to="/admin/audit/logins" label={t("admin.nav.auditLogins")} />
-          <NavItem to="/admin/account" label={t("admin.nav.account")} />
-          <NavItem to="/admin/settings" label={t("admin.nav.settings")} />
-        </div>
+      {/* The sidebar only appears from lg up: below that its 220px column would
+          squeeze every admin page on tablets. */}
+      <nav className="border-b lg:hidden">
+        <div className="container flex gap-1 overflow-x-auto py-2">{navItems}</div>
       </nav>
 
-      <div className="container grid gap-6 py-8 md:grid-cols-[220px_1fr]">
-        <aside className="hidden space-y-2 md:block">
-          <NavItem to="/admin/agents" label={t("admin.nav.agents")} />
-          <NavItem to="/admin/probes" label={t("admin.nav.probeTasks")} />
-          <NavItem to="/admin/alerts" label={t("admin.nav.alerts")} />
-          <NavItem to="/admin/audit/logins" label={t("admin.nav.auditLogins")} />
-          <NavItem to="/admin/account" label={t("admin.nav.account")} />
-          <NavItem to="/admin/settings" label={t("admin.nav.settings")} />
+      <div className="container grid gap-6 py-8 lg:grid-cols-[220px_1fr]">
+        <aside className="hidden space-y-2 lg:sticky lg:top-8 lg:block lg:self-start">
+          {navItems}
         </aside>
         <main className="min-w-0">
           <Outlet />

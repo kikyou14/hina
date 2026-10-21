@@ -4,23 +4,8 @@ import { useTranslation } from "react-i18next";
 import { AnimatedTabsList } from "@/components/AnimatedTabsList";
 import { useSiteConfig } from "@/components/SiteConfigProvider";
 import { Badge } from "@/components/ui/badge";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import { Tabs, TabsContent } from "@/components/ui/tabs";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
 import { formatIsoShort, formatTimeAgo } from "@/lib/time";
@@ -28,17 +13,26 @@ import { getUserErrorMessage } from "@/lib/userErrors";
 import { AlertChannelsPanel } from "@/pages/admin/AlertChannelsPanel";
 import { AlertRulesPanel } from "@/pages/admin/AlertRulesPanel";
 import { useAdminActiveAlerts, useAdminAlertNotifications } from "@/queries/adminAlerts";
+import { BADGE_TINT, SeverityBadge } from "./components/AdminBadges";
+import { AdminFilterTabs, AdminList, AdminListRow } from "./components/AdminList";
+import { AdminPageHeader } from "./components/AdminPageHeader";
+
+// Tracks: rule, agent, active since, value, severity.
+const ACTIVE_GRID = "@2xl/list:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)_6rem_minmax(0,1fr)_5rem]";
+// Tracks: rule, kind, channel, event time, status.
+const NOTIFICATION_GRID = "@2xl/list:grid-cols-[minmax(0,1fr)_5rem_minmax(0,1fr)_7.5rem_5rem]";
 
 const NOTIFICATION_STATUSES = ["pending", "sent", "dead"] as const;
+type NotificationFilter = "all" | (typeof NOTIFICATION_STATUSES)[number];
 
 export function AlertsPage() {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   useDocumentTitle(t("alerts.title"));
   const { timezone } = useSiteConfig();
   const nowMs = Date.now();
 
   const [tab, setTab] = React.useState("active");
-  const [status, setStatus] = React.useState("all");
+  const [status, setStatus] = React.useState<NotificationFilter>("all");
   const active = useAdminActiveAlerts({ enabled: tab === "active" });
   const notifications = useAdminAlertNotifications(status === "all" ? undefined : status, {
     enabled: tab === "notifications",
@@ -55,11 +49,20 @@ export function AlertsPage() {
     [t],
   );
 
+  const statusItems = [
+    { value: "all" as const, label: t("common.all") },
+    ...NOTIFICATION_STATUSES.map((s) => ({
+      value: s,
+      label: t(`alerts.notifications.statuses.${s}`),
+    })),
+  ];
+
+  const alerts = active.data?.alerts ?? [];
+  const notificationList = notifications.data?.notifications ?? [];
+
   return (
     <div className="space-y-4">
-      <div>
-        <div className="text-xl font-semibold">{t("alerts.title")}</div>
-      </div>
+      <AdminPageHeader title={t("alerts.title")} />
 
       <Tabs value={tab} onValueChange={setTab}>
         <AnimatedTabsList items={tabItems} value={tab} />
@@ -67,19 +70,12 @@ export function AlertsPage() {
         <TabsContent value="active" className="space-y-4">
           <Card>
             <CardHeader>
-              <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
-                <div>
-                  <CardTitle>{t("alerts.active.title")}</CardTitle>
-                  <CardDescription>
-                    {active.isLoading ? (
-                      <Skeleton className="inline-block h-4 w-16 align-middle" />
-                    ) : (
-                      t("alerts.active.count", {
-                        count: active.data?.alerts.length ?? 0,
-                      })
-                    )}
-                  </CardDescription>
-                </div>
+              <div className="text-muted-foreground">
+                {active.isLoading ? (
+                  <Skeleton className="h-4 w-16" />
+                ) : (
+                  t("alerts.active.count", { count: alerts.length })
+                )}
               </div>
             </CardHeader>
             <CardContent>
@@ -88,51 +84,46 @@ export function AlertsPage() {
                   {getUserErrorMessage(active.error, t, { action: "load" })}
                 </div>
               ) : (
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>{t("alerts.active.severity")}</TableHead>
-                      <TableHead>{t("alerts.active.rule")}</TableHead>
-                      <TableHead>{t("alerts.active.kind")}</TableHead>
-                      <TableHead>{t("alerts.active.agent")}</TableHead>
-                      <TableHead>{t("alerts.active.activeSince")}</TableHead>
-                      <TableHead>{t("alerts.active.value")}</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {(active.data?.alerts ?? []).map((a, i) => (
-                      <TableRow key={`${a.rule.id}:${i}`}>
-                        <TableCell>
-                          <Badge
-                            className={
-                              a.rule.severity === "critical"
-                                ? "bg-red-500/10 text-red-600 dark:text-red-400"
-                                : a.rule.severity === "warning"
-                                  ? "bg-yellow-500/10 text-yellow-600 dark:text-yellow-400"
-                                  : ""
-                            }
-                            variant={a.rule.severity === "info" ? "outline" : undefined}
-                          >
-                            {t(`alerts.severities.${a.rule.severity}`, a.rule.severity)}
-                          </Badge>
-                        </TableCell>
-                        <TableCell className="font-medium">{a.rule.name}</TableCell>
-                        <TableCell>
-                          <Badge variant="outline">
+                <AdminList
+                  grid={ACTIVE_GRID}
+                  columns={[
+                    t("alerts.active.rule"),
+                    t("alerts.active.agent"),
+                    t("alerts.active.activeSince"),
+                    t("alerts.active.value"),
+                    t("alerts.active.severity"),
+                  ]}
+                  count={alerts.length}
+                  loading={active.isLoading}
+                  empty={t("common.noData")}
+                >
+                  {alerts.map((a, i) => (
+                    <AdminListRow
+                      key={`${a.rule.id}:${i}`}
+                      grid={ACTIVE_GRID}
+                      primary={
+                        <>
+                          <div className="truncate text-sm font-medium" title={a.rule.name}>
+                            {a.rule.name}
+                          </div>
+                          <div className="text-muted-foreground mt-0.5 truncate leading-4">
                             {t(`alerts.kinds.${a.rule.kind}`, a.rule.kind)}
-                          </Badge>
-                        </TableCell>
-                        <TableCell className="text-sm">{a.agentName ?? "-"}</TableCell>
-                        <TableCell className="text-sm">
-                          {a.activeSinceMs ? formatTimeAgo(a.activeSinceMs, nowMs) : "-"}
-                        </TableCell>
-                        <TableCell className="text-muted-foreground text-sm">
-                          {a.valueSummary ?? "-"}
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
+                          </div>
+                        </>
+                      }
+                      cells={[
+                        a.agentName ? <div className="truncate">{a.agentName}</div> : null,
+                        a.activeSinceMs
+                          ? formatTimeAgo(a.activeSinceMs, nowMs, i18n.language)
+                          : null,
+                        a.valueSummary ? (
+                          <div className="text-muted-foreground break-words">{a.valueSummary}</div>
+                        ) : null,
+                      ]}
+                      aside={<SeverityBadge severity={a.rule.severity} />}
+                    />
+                  ))}
+                </AdminList>
               )}
             </CardContent>
           </Card>
@@ -141,32 +132,15 @@ export function AlertsPage() {
         <TabsContent value="notifications" className="space-y-4">
           <Card>
             <CardHeader>
-              <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
-                <div>
-                  <CardTitle>{t("alerts.notifications.title")}</CardTitle>
-                  <CardDescription>
-                    {notifications.isLoading ? (
-                      <Skeleton className="inline-block h-4 w-16 align-middle" />
-                    ) : (
-                      t("alerts.notifications.count", {
-                        count: notifications.data?.notifications.length ?? 0,
-                      })
-                    )}
-                  </CardDescription>
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="text-muted-foreground">
+                  {notifications.isLoading ? (
+                    <Skeleton className="h-4 w-16" />
+                  ) : (
+                    t("alerts.notifications.count", { count: notificationList.length })
+                  )}
                 </div>
-                <Select value={status} onValueChange={setStatus}>
-                  <SelectTrigger className="w-40">
-                    <SelectValue placeholder={t("alerts.notifications.allStatuses")} />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">{t("alerts.notifications.allStatuses")}</SelectItem>
-                    {NOTIFICATION_STATUSES.map((s) => (
-                      <SelectItem key={s} value={s}>
-                        {t(`alerts.notifications.statuses.${s}`)}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <AdminFilterTabs value={status} onChange={setStatus} items={statusItems} />
               </div>
             </CardHeader>
             <CardContent>
@@ -175,64 +149,66 @@ export function AlertsPage() {
                   {getUserErrorMessage(notifications.error, t, { action: "load" })}
                 </div>
               ) : (
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>{t("alerts.notifications.status")}</TableHead>
-                      <TableHead>{t("alerts.notifications.kind")}</TableHead>
-                      <TableHead>{t("alerts.notifications.rule")}</TableHead>
-                      <TableHead>{t("alerts.notifications.channel")}</TableHead>
-                      <TableHead>{t("alerts.notifications.event")}</TableHead>
-                      <TableHead>{t("alerts.notifications.error")}</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {(notifications.data?.notifications ?? []).map((n) => (
-                      <TableRow key={n.id}>
-                        <TableCell>
-                          <Badge
-                            className={
-                              n.status === "sent"
-                                ? "bg-green-500/10 text-green-600 dark:text-green-400"
-                                : n.status === "dead"
-                                  ? ""
-                                  : "bg-yellow-500/10 text-yellow-600 dark:text-yellow-400"
-                            }
-                            variant={n.status === "dead" ? "destructive" : undefined}
-                          >
-                            {t(`alerts.notifications.statuses.${n.status}`, n.status)}
-                          </Badge>
-                        </TableCell>
-                        <TableCell>
-                          <Badge
-                            className={
-                              n.kind === "firing"
-                                ? "bg-red-500/10 text-red-600 dark:text-red-400"
-                                : "bg-green-500/10 text-green-600 dark:text-green-400"
-                            }
-                          >
-                            {t(`alerts.notifications.${n.kind}`)}
-                          </Badge>
-                        </TableCell>
-                        <TableCell className="text-sm font-medium">
-                          {n.rule.name ?? n.rule.id}
-                        </TableCell>
-                        <TableCell className="text-sm">
+                <AdminList
+                  grid={NOTIFICATION_GRID}
+                  columns={[
+                    t("alerts.notifications.rule"),
+                    t("alerts.notifications.kind"),
+                    t("alerts.notifications.channel"),
+                    t("alerts.notifications.event"),
+                    t("alerts.notifications.status"),
+                  ]}
+                  count={notificationList.length}
+                  loading={notifications.isLoading}
+                  empty={t("common.noData")}
+                >
+                  {notificationList.map((n) => (
+                    <AdminListRow
+                      key={n.id}
+                      grid={NOTIFICATION_GRID}
+                      primary={
+                        <>
+                          <div className="truncate text-sm font-medium">
+                            {n.rule.name ?? n.rule.id}
+                          </div>
+                          {n.lastError ? (
+                            <div className="text-destructive mt-0.5 leading-4 break-words">
+                              {n.lastError}
+                            </div>
+                          ) : null}
+                        </>
+                      }
+                      cells={[
+                        <Badge className={n.kind === "firing" ? BADGE_TINT.red : BADGE_TINT.green}>
+                          {t(`alerts.notifications.${n.kind}`)}
+                        </Badge>,
+                        <div className="truncate">
                           {n.channel.name ?? n.channel.id}
-                          <span className="text-muted-foreground ml-1 text-xs">
-                            {n.channel.type ? `(${n.channel.type})` : ""}
-                          </span>
-                        </TableCell>
-                        <TableCell className="text-xs">
+                          {n.channel.type ? (
+                            <span className="text-muted-foreground ml-1">({n.channel.type})</span>
+                          ) : null}
+                        </div>,
+                        <span className="tabular-nums">
                           {formatIsoShort(n.eventTsMs, timezone)}
-                        </TableCell>
-                        <TableCell className="text-destructive text-xs">
-                          {n.lastError ?? ""}
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
+                        </span>,
+                      ]}
+                      aside={
+                        <Badge
+                          className={
+                            n.status === "dead"
+                              ? undefined
+                              : n.status === "sent"
+                                ? BADGE_TINT.green
+                                : BADGE_TINT.yellow
+                          }
+                          variant={n.status === "dead" ? "destructive" : undefined}
+                        >
+                          {t(`alerts.notifications.statuses.${n.status}`, n.status)}
+                        </Badge>
+                      }
+                    />
+                  ))}
+                </AdminList>
               )}
             </CardContent>
           </Card>

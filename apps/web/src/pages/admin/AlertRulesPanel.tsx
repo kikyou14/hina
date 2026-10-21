@@ -1,4 +1,5 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { Plus, Trash2 } from "lucide-react";
 import * as React from "react";
 import { useTranslation } from "react-i18next";
 
@@ -8,9 +9,8 @@ import { AdminPagination } from "@/components/AdminPagination";
 import { useConfirm } from "@/components/ConfirmDialog";
 import { QueryErrorCard } from "@/components/QueryErrorCard";
 import { useSiteConfig } from "@/components/SiteConfigProvider";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import {
   Dialog,
   DialogContent,
@@ -19,20 +19,40 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { Skeleton } from "@/components/ui/skeleton";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import { formatIsoShort } from "@/lib/time";
 import { useAdminAgentOptions } from "@/queries/adminAgents";
 import { useAdminAlertChannelOptions, useAdminAlertRules } from "@/queries/adminAlerts";
 import { invalidateAdminGroups, useAdminGroups } from "@/queries/adminGroups";
 import { useAdminProbeTaskOptions } from "@/queries/adminProbes";
+import { EnabledBadge, SeverityBadge } from "./components/AdminBadges";
+import { AdminList, AdminListRow } from "./components/AdminList";
 import { AlertRuleForm } from "./components/AlertRuleForm";
+import { RowActions } from "./components/RowActions";
+
+// Tracks: rule, severity, channels, updated, status, actions.
+const RULE_GRID = "@2xl/list:grid-cols-[minmax(0,1.4fr)_5rem_minmax(0,1fr)_7.5rem_4.5rem_4.25rem]";
+
+function RuleIdentity({ rule: r }: { rule: AdminAlertRule }) {
+  const { t } = useTranslation();
+  // Expiry and route-change rules don't use the for/recover delay.
+  const hasDelay = r.kind !== "agent_expiring" && r.kind !== "route_change";
+  const meta = [
+    t(`alerts.kinds.${r.kind}`, r.kind),
+    hasDelay &&
+      `${t("settings.rules.table.delay")} ${Math.round(r.forMs / 1000)}s / ${Math.round(r.recoverMs / 1000)}s`,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+
+  return (
+    <>
+      <div className="truncate text-sm font-medium" title={r.name}>
+        {r.name}
+      </div>
+      <div className="text-muted-foreground mt-0.5 truncate leading-4">{meta}</div>
+    </>
+  );
+}
 
 export function AlertRulesPanel() {
   const { t } = useTranslation();
@@ -97,6 +117,8 @@ export function AlertRulesPanel() {
     });
   };
 
+  const ruleList = rules.data?.rules ?? [];
+
   return (
     <>
       {rules.isError ? (
@@ -109,22 +131,20 @@ export function AlertRulesPanel() {
 
       <Card>
         <CardHeader>
-          <div className="flex items-center justify-between gap-4">
-            <div className="space-y-1.5">
-              <CardTitle>{t("settings.rules.table.title")}</CardTitle>
-              <CardDescription>
-                {rules.isLoading ? (
-                  <Skeleton className="inline-block h-4 w-16 align-middle" />
-                ) : (
-                  t("settings.rules.table.count", {
-                    count: rules.data?.total ?? 0,
-                  })
-                )}
-              </CardDescription>
+          <div className="flex items-center justify-between gap-3">
+            <div className="text-muted-foreground">
+              {rules.isLoading ? (
+                <Skeleton className="h-4 w-16" />
+              ) : (
+                t("settings.rules.table.count", { count: rules.data?.total ?? 0 })
+              )}
             </div>
             <Dialog open={createRuleOpen} onOpenChange={setCreateRuleOpen}>
               <DialogTrigger asChild>
-                <Button>{t("settings.rules.createRule")}</Button>
+                <Button>
+                  <Plus data-icon="inline-start" />
+                  {t("settings.rules.createRule")}
+                </Button>
               </DialogTrigger>
               <DialogContent className="max-w-xl" scrollBehavior="viewport">
                 <DialogHeader>
@@ -147,79 +167,55 @@ export function AlertRulesPanel() {
           </div>
         </CardHeader>
         <CardContent>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>{t("settings.rules.table.name")}</TableHead>
-                <TableHead>{t("settings.rules.table.severity")}</TableHead>
-                <TableHead>{t("settings.rules.table.kind")}</TableHead>
-                <TableHead>{t("settings.rules.table.status")}</TableHead>
-                <TableHead>{t("settings.rules.table.delay")}</TableHead>
-                <TableHead>{t("settings.rules.table.channels")}</TableHead>
-                <TableHead>{t("settings.rules.table.updated")}</TableHead>
-                <TableHead>{t("settings.rules.table.actions")}</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {(rules.data?.rules ?? []).map((r) => (
-                <TableRow key={r.id}>
-                  <TableCell className="font-medium">{r.name}</TableCell>
-                  <TableCell>
-                    <Badge
-                      className={
-                        r.severity === "critical"
-                          ? "bg-red-500/10 text-red-600 dark:text-red-400"
-                          : r.severity === "warning"
-                            ? "bg-yellow-500/10 text-yellow-600 dark:text-yellow-400"
-                            : ""
-                      }
-                      variant={r.severity === "info" ? "outline" : undefined}
-                    >
-                      {t(`alerts.severities.${r.severity}`, r.severity)}
-                    </Badge>
-                  </TableCell>
-                  <TableCell>
-                    <Badge variant="outline">{t(`alerts.kinds.${r.kind}`, r.kind)}</Badge>
-                  </TableCell>
-                  <TableCell>
-                    {r.enabled ? (
-                      <Badge className="bg-green-500/10 text-green-600 dark:text-green-400">
-                        {t("common.enabled")}
-                      </Badge>
-                    ) : (
-                      <Badge variant="destructive">{t("common.disabled")}</Badge>
-                    )}
-                  </TableCell>
-                  <TableCell className="text-muted-foreground text-xs">
-                    {r.kind === "agent_expiring" || r.kind === "route_change"
-                      ? "\u2014"
-                      : `${Math.round(r.forMs / 1000)}s / ${Math.round(r.recoverMs / 1000)}s`}
-                  </TableCell>
-                  <TableCell className="text-xs">
-                    {r.channels.map((ch) => ch.name).join(", ") || "\u2014"}
-                  </TableCell>
-                  <TableCell className="text-xs">
-                    {formatIsoShort(r.updatedAtMs, timezone)}
-                  </TableCell>
-                  <TableCell>
-                    <div className="flex flex-wrap gap-2">
-                      <Button variant="outline" size="sm" onClick={() => setEditRule(r)}>
-                        {t("common.edit")}
-                      </Button>
-                      <Button
-                        variant="destructive"
-                        size="sm"
-                        onClick={() => handleDeleteRule(r.id)}
-                        disabled={removeRule.isPending}
-                      >
-                        {t("common.delete")}
-                      </Button>
-                    </div>
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+          <AdminList
+            grid={RULE_GRID}
+            columns={[
+              t("settings.rules.table.name"),
+              t("settings.rules.table.severity"),
+              t("settings.rules.table.channels"),
+              t("settings.rules.table.updated"),
+              t("settings.rules.table.status"),
+              "",
+            ]}
+            count={ruleList.length}
+            loading={rules.isLoading}
+            empty={rules.isError ? null : t("common.noData")}
+          >
+            {ruleList.map((r) => {
+              const channelNames = r.channels.map((ch) => ch.name).join(", ");
+              return (
+                <AdminListRow
+                  key={r.id}
+                  grid={RULE_GRID}
+                  primary={<RuleIdentity rule={r} />}
+                  cells={[
+                    <SeverityBadge severity={r.severity} />,
+                    channelNames ? (
+                      <div className="truncate" title={channelNames}>
+                        {channelNames}
+                      </div>
+                    ) : null,
+                    <span className="tabular-nums">{formatIsoShort(r.updatedAtMs, timezone)}</span>,
+                  ]}
+                  aside={<EnabledBadge enabled={r.enabled} />}
+                  actions={
+                    <RowActions
+                      onEdit={() => setEditRule(r)}
+                      menu={[
+                        {
+                          label: t("common.delete"),
+                          icon: Trash2,
+                          destructive: true,
+                          disabled: removeRule.isPending,
+                          onSelect: () => handleDeleteRule(r.id),
+                        },
+                      ]}
+                    />
+                  }
+                />
+              );
+            })}
+          </AdminList>
           <AdminPagination
             className="mt-4"
             total={rules.data?.total ?? 0}

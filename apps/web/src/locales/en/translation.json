@@ -18,8 +18,6 @@
     "confirmDelete": "Confirm deletion",
     "clear": "Clear",
     "all": "All",
-    "true": "True",
-    "false": "False",
     "enable": "Enable",
     "enabled": "Enabled",
     "disabled": "Disabled",
@@ -42,6 +40,9 @@
       "system": "System"
     },
     "noData": "No data",
+    "noMatches": "Nothing matches these filters.",
+    "moreActions": "More actions",
+    "dragToReorder": "Drag to reorder",
     "optional": "optional",
     "test": "Test",
     "error": "An error occurred",
@@ -138,17 +139,20 @@
       "title": "Create agent"
     },
     "filters": {
-      "tags": "Tags",
-      "enabled": "Enabled"
+      "tags": "Tags"
     },
     "table": {
-      "name": "Name",
-      "group": "Group",
+      "node": "Agent",
       "ip": "IP",
-      "version": "Version",
-      "actions": "Actions"
+      "status": "Status"
     },
-    "shownTotal": "{{shown}} shown / {{total}} total",
+    "summary": "{{total}} total · {{online}} online",
+    "summaryTotal": "{{total}} total",
+    "searchPlaceholder": "Search name, IP, group, or note",
+    "allGroups": "All groups",
+    "ungrouped": "Ungrouped",
+    "neverConnected": "Never seen",
+    "empty": "No agents yet. Use Create agent to add your first one.",
     "editDialog": {
       "title": "Edit agent"
     },
@@ -173,7 +177,6 @@
     "deleteConfirm": "Delete agent? This action cannot be undone and will delete all associated historical data.",
     "deleteFailed": "Failed to delete agent.",
     "reorderFailed": "Failed to save sort order.",
-    "dragToReorder": "Drag to reorder",
     "form": {
       "groupByName": "Group (by name)",
       "note": "Note",
@@ -238,19 +241,15 @@
       "notifications": "Notifications"
     },
     "active": {
-      "title": "Active alerts",
       "count": "{{count}} active",
       "severity": "Severity",
       "rule": "Rule",
-      "kind": "Kind",
       "agent": "Agent",
       "activeSince": "Active since",
       "value": "Value"
     },
     "notifications": {
-      "title": "Notification outbox",
       "count": "{{count}} items",
-      "allStatuses": "All statuses",
       "status": "Status",
       "kind": "Kind",
       "firing": "Firing",
@@ -258,7 +257,6 @@
       "rule": "Rule",
       "channel": "Channel",
       "event": "Event",
-      "error": "Error",
       "statuses": {
         "pending": "Pending",
         "sent": "Sent",
@@ -343,10 +341,8 @@
     "table": {
       "name": "Name",
       "kind": "Kind",
-      "target": "Target",
       "interval": "Interval",
       "status": "Status",
-      "actions": "Actions",
       "agents": "{{count}} agent(s)"
     },
     "tcpUnsupported": {
@@ -504,14 +500,11 @@
         "title": "Edit channel"
       },
       "table": {
-        "title": "Alert channels",
         "count": "{{count}} channels",
         "name": "Name",
         "type": "Type",
         "status": "Status",
-        "config": "Config",
-        "updated": "Updated",
-        "actions": "Actions"
+        "updated": "Updated"
       },
       "testSent": "Test sent.",
       "testFailed": "Test failed.",
@@ -527,16 +520,13 @@
         "title": "Edit rule"
       },
       "table": {
-        "title": "Alert rules",
         "count": "{{count}} rules",
         "name": "Name",
         "severity": "Severity",
-        "kind": "Kind",
         "status": "Status",
         "delay": "Delay",
         "channels": "Channels",
-        "updated": "Updated",
-        "actions": "Actions"
+        "updated": "Updated"
       },
       "deleteConfirm": "Delete this rule?",
       "deleteFailed": "Failed to delete rule."

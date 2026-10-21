@@ -1,10 +1,29 @@
-export function formatTimeAgo(tsMs: number | null | undefined, nowMs: number): string {
+const relativeTimeFormatters = new Map<string, Intl.RelativeTimeFormat>();
+
+// `narrow` keeps the compact "5m ago" / "5分钟前" shape the admin lists are laid
+// out for. Formatters are cached because the tables rebuild them once per row
+// per tick otherwise.
+function relativeTimeFormatter(locale: string): Intl.RelativeTimeFormat {
+  let formatter = relativeTimeFormatters.get(locale);
+  if (!formatter) {
+    formatter = new Intl.RelativeTimeFormat(locale, { numeric: "auto", style: "narrow" });
+    relativeTimeFormatters.set(locale, formatter);
+  }
+  return formatter;
+}
+
+export function formatTimeAgo(
+  tsMs: number | null | undefined,
+  nowMs: number,
+  locale: string,
+): string {
   if (!tsMs || !Number.isFinite(tsMs)) return "-";
   const delta = Math.max(0, nowMs - tsMs);
-  if (delta < 60_000) return `${Math.floor(delta / 1000)}s ago`;
-  if (delta < 60 * 60_000) return `${Math.floor(delta / 60_000)}m ago`;
-  if (delta < 24 * 60 * 60_000) return `${Math.floor(delta / (60 * 60_000))}h ago`;
-  return `${Math.floor(delta / (24 * 60 * 60_000))}d ago`;
+  const formatter = relativeTimeFormatter(locale);
+  if (delta < 60_000) return formatter.format(-Math.floor(delta / 1000), "second");
+  if (delta < 60 * 60_000) return formatter.format(-Math.floor(delta / 60_000), "minute");
+  if (delta < 24 * 60 * 60_000) return formatter.format(-Math.floor(delta / (60 * 60_000)), "hour");
+  return formatter.format(-Math.floor(delta / (24 * 60 * 60_000)), "day");
 }
 
 export function formatIsoShort(tsMs: number | null | undefined, timezone?: string): string {

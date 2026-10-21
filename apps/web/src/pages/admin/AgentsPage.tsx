@@ -1,42 +1,24 @@
-import {
-  DndContext,
-  closestCenter,
-  KeyboardSensor,
-  PointerSensor,
-  useSensor,
-  useSensors,
-  type DragEndEvent,
-  type Modifier,
-} from "@dnd-kit/core";
-import {
-  SortableContext,
-  arrayMove,
-  sortableKeyboardCoordinates,
-  useSortable,
-  verticalListSortingStrategy,
-} from "@dnd-kit/sortable";
-import { CSS } from "@dnd-kit/utilities";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { GripVertical } from "lucide-react";
+import { EyeOff, Plus, SquareTerminal, Trash2, X } from "lucide-react";
 import * as React from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 
-import { toast } from "sonner";
 import {
   createAdminAgent,
   deleteAdminAgent,
   patchAdminAgent,
   reorderAdminAgents,
 } from "@/api/adminAgents";
-import type { AdminAgent, AdminAgentsResponse } from "@/api/adminAgents";
+import type { AdminAgent } from "@/api/adminAgents";
 import { AdminPagination } from "@/components/AdminPagination";
 import { useConfirm } from "@/components/ConfirmDialog";
 import { CountryFlag } from "@/components/CountryFlag";
 import { QueryErrorCard } from "@/components/QueryErrorCard";
+import { useSiteConfig } from "@/components/SiteConfigProvider";
 import { TagBadge } from "@/components/TagBadge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import {
   Dialog,
   DialogContent,
@@ -44,264 +26,159 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import { Skeleton } from "@/components/ui/skeleton";
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Skeleton } from "@/components/ui/skeleton";
+import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
-import { useMediaQuery } from "@/hooks/useMediaQuery";
+import { useNowValue } from "@/hooks/useNowTicker";
+import { formatIsoShort, formatTimeAgo } from "@/lib/time";
+import { cn } from "@/lib/utils";
 import { useAdminAgents } from "@/queries/adminAgents";
-import { invalidateAdminGroups } from "@/queries/adminGroups";
+import { invalidateAdminGroups, useAdminGroups } from "@/queries/adminGroups";
 import { AgentDeployDialog } from "./AgentDeployDialog";
+import { AdminFilterTabs, AdminList, AdminSearchInput } from "./components/AdminList";
+import { AdminPageHeader } from "./components/AdminPageHeader";
 import { AgentIpList } from "./components/AgentIpList";
 import { CreateAgentForm } from "./components/CreateAgentForm";
 import { EditAgentForm } from "./components/EditAgentForm";
+import { RowActions } from "./components/RowActions";
+import { SortableList, SortableRow } from "./components/SortableList";
+import { useReorderMutation } from "./lib/reorder";
 
-const MD_QUERY = "(min-width: 768px)";
+// Tracks: handle, agent, IP, tags, status, actions.
+const AGENT_GRID = "@2xl/list:grid-cols-[1.5rem_minmax(0,1fr)_9rem_minmax(0,0.8fr)_4.5rem_4.25rem]";
 
-function AgentDragHandle({
-  activatorRef,
-  listeners,
-}: {
-  activatorRef: (node: HTMLElement | null) => void;
-  listeners: ReturnType<typeof useSortable>["listeners"];
-}) {
+const ALL_GROUPS = "__all__";
+
+const SEARCH_DEBOUNCE_MS = 250;
+
+type StatusFilter = "all" | "online" | "offline";
+
+function AgentIdentity({ agent: a }: { agent: AdminAgent }) {
   const { t } = useTranslation();
-  const label = t("agents.dragToReorder");
-  return (
-    <button
-      ref={activatorRef}
-      {...listeners}
-      type="button"
-      className="text-muted-foreground hover:text-foreground flex cursor-grab items-center justify-center rounded p-1 active:cursor-grabbing"
-      tabIndex={-1}
-      aria-label={label}
-      title={label}
-    >
-      <GripVertical className="size-4" aria-hidden="true" />
-      <span className="sr-only">{label}</span>
-    </button>
-  );
-}
-
-function AgentActions({
-  onEdit,
-  onDeploy,
-  onDelete,
-  deleteDisabled,
-}: {
-  onEdit: () => void;
-  onDeploy: () => void;
-  onDelete: () => void;
-  deleteDisabled: boolean;
-}) {
-  const { t } = useTranslation();
-  return (
-    <div className="flex flex-wrap gap-2">
-      <Button variant="outline" size="sm" onClick={onEdit}>
-        {t("common.edit")}
-      </Button>
-      <Button variant="outline" size="sm" onClick={onDeploy}>
-        {t("agents.deploy.button")}
-      </Button>
-      <Button variant="destructive" size="sm" onClick={onDelete} disabled={deleteDisabled}>
-        {t("common.delete")}
-      </Button>
-    </div>
-  );
-}
-
-function SortableAgentRowCompact({
-  agent: a,
-  onEdit,
-  onDeploy,
-  onDelete,
-  deleteDisabled,
-  draggable,
-}: {
-  agent: AdminAgent;
-  onEdit: () => void;
-  onDeploy: () => void;
-  onDelete: () => void;
-  deleteDisabled: boolean;
-  draggable: boolean;
-}) {
-  const {
-    attributes,
-    listeners,
-    setNodeRef,
-    setActivatorNodeRef,
-    transform,
-    transition,
-    isDragging,
-  } = useSortable({ id: a.id, disabled: !draggable });
-
-  const style: React.CSSProperties = {
-    transform: CSS.Transform.toString(transform),
-    transition,
-    opacity: isDragging ? 0.5 : undefined,
-  };
+  const meta = [
+    a.group ?? t("agents.ungrouped"),
+    a.system.agentVersion && `v${a.system.agentVersion}`,
+  ]
+    .filter(Boolean)
+    .join(" · ");
 
   return (
-    <div
-      ref={setNodeRef}
-      style={style}
-      {...attributes}
-      className="border-b px-4 py-3 last:border-b-0"
-    >
-      <div className="flex items-center gap-2">
-        {draggable ? (
-          <AgentDragHandle activatorRef={setActivatorNodeRef} listeners={listeners} />
-        ) : (
-          <div className="w-6" />
-        )}
-        <span
-          className={
-            a.status.online
-              ? "h-2 w-2 shrink-0 rounded-full bg-emerald-500"
-              : "bg-muted-foreground/40 h-2 w-2 shrink-0 rounded-full"
-          }
-        />
-        <CountryFlag code={a.geo.countryCode} className="text-base" />
+    <>
+      <div className="flex min-w-0 items-center gap-1.5">
+        <CountryFlag code={a.geo.countryCode} className="shrink-0 text-base leading-none" />
         <Link
           to={`/agents/${encodeURIComponent(a.id)}`}
-          className="min-w-0 truncate font-medium hover:underline"
+          className="truncate text-sm font-medium hover:underline"
+          title={a.name}
         >
           {a.name}
         </Link>
-        {a.group || a.system.agentVersion ? (
-          <span className="text-muted-foreground ml-auto flex shrink-0 items-center gap-1 text-xs">
-            {a.group ? <span>{a.group}</span> : null}
-            {a.group && a.system.agentVersion ? <span aria-hidden>·</span> : null}
-            {a.system.agentVersion ? (
-              <span className="font-mono">v{a.system.agentVersion}</span>
-            ) : null}
+        {a.isPublic ? null : (
+          <span className="text-muted-foreground shrink-0" title={t("common.private")}>
+            <EyeOff className="size-3.5" aria-hidden="true" />
+            <span className="sr-only">{t("common.private")}</span>
           </span>
-        ) : null}
+        )}
       </div>
-
-      <div className="mt-2 pl-8 text-xs">
-        <AgentIpList status={a.status} />
-      </div>
-
-      {a.tags.length > 0 ? (
-        <div className="mt-2 flex flex-wrap gap-1 pl-8">
-          {a.tags.map((tag) => (
-            <TagBadge key={tag} tag={tag} />
-          ))}
-        </div>
-      ) : null}
-
-      <div className="mt-3 pl-8">
-        <AgentActions
-          onEdit={onEdit}
-          onDeploy={onDeploy}
-          onDelete={onDelete}
-          deleteDisabled={deleteDisabled}
-        />
-      </div>
-    </div>
+      <div className="text-muted-foreground mt-0.5 truncate leading-4">{meta}</div>
+    </>
   );
 }
 
-function SortableAgentRow({
-  agent: a,
-  onEdit,
-  onDeploy,
-  onDelete,
-  deleteDisabled,
-  draggable,
-}: {
-  agent: AdminAgent;
-  onEdit: () => void;
-  onDeploy: () => void;
-  onDelete: () => void;
-  deleteDisabled: boolean;
-  draggable: boolean;
-}) {
-  const {
-    attributes,
-    listeners,
-    setNodeRef,
-    setActivatorNodeRef,
-    transform,
-    transition,
-    isDragging,
-  } = useSortable({ id: a.id, disabled: !draggable });
-
-  const style: React.CSSProperties = {
-    transform: CSS.Transform.toString(transform),
-    transition,
-    opacity: isDragging ? 0.5 : undefined,
-  };
+function AgentStatus({ status }: { status: AdminAgent["status"] }) {
+  const { t, i18n } = useTranslation();
+  const { timezone } = useSiteConfig();
+  const { online, lastSeenAtMs } = status;
+  const lastSeen = useNowValue((nowMs) =>
+    online || lastSeenAtMs === null ? null : formatTimeAgo(lastSeenAtMs, nowMs, i18n.language),
+  );
 
   return (
-    <TableRow ref={setNodeRef} style={style} {...attributes}>
-      <TableCell className="w-8 px-1">
-        {draggable ? (
-          <AgentDragHandle activatorRef={setActivatorNodeRef} listeners={listeners} />
-        ) : null}
-      </TableCell>
-      <TableCell>
-        <div className="flex items-center gap-1.5">
-          <span
-            className={
-              a.status.online
-                ? "h-2 w-2 rounded-full bg-emerald-500"
-                : "bg-muted-foreground/40 h-2 w-2 rounded-full"
-            }
-          />
-          <CountryFlag code={a.geo.countryCode} className="text-base" />
-          <Link to={`/agents/${encodeURIComponent(a.id)}`} className="font-medium hover:underline">
-            {a.name}
-          </Link>
-        </div>
-      </TableCell>
-      <TableCell className="text-xs">
-        <AgentIpList status={a.status} />
-      </TableCell>
-      <TableCell>
-        {a.tags.length > 0 ? (
-          <div className="flex flex-wrap gap-1">
-            {a.tags.map((tag) => (
-              <TagBadge key={tag} tag={tag} />
-            ))}
-          </div>
-        ) : (
-          <span className="text-muted-foreground">-</span>
+    <div className="leading-tight whitespace-nowrap">
+      <div
+        className={cn(
+          "flex items-center gap-1.5",
+          online ? "text-emerald-600 dark:text-emerald-400" : "text-muted-foreground",
         )}
-      </TableCell>
-      <TableCell>{a.group ?? "-"}</TableCell>
-      <TableCell className="font-mono text-xs">{a.system.agentVersion ?? "-"}</TableCell>
-      <TableCell>
-        <AgentActions
-          onEdit={onEdit}
-          onDeploy={onDeploy}
-          onDelete={onDelete}
-          deleteDisabled={deleteDisabled}
+      >
+        <span
+          className={cn(
+            "size-1.5 shrink-0 rounded-full",
+            online ? "bg-emerald-500" : "bg-muted-foreground/40",
+          )}
         />
-      </TableCell>
-    </TableRow>
+        {online ? t("common.online") : t("common.offline")}
+      </div>
+      {online ? null : (
+        <div
+          className="text-muted-foreground mt-0.5 pl-3 text-[11px]"
+          title={lastSeenAtMs === null ? undefined : formatIsoShort(lastSeenAtMs, timezone)}
+        >
+          {lastSeen ?? t("agents.neverConnected")}
+        </div>
+      )}
+    </div>
   );
 }
 
 export function AgentsPage() {
   const { t } = useTranslation();
   useDocumentTitle(t("agents.title"));
-  const isDesktop = useMediaQuery(MD_QUERY);
   const queryClient = useQueryClient();
   const confirm = useConfirm();
 
+  const [q, setQ] = React.useState("");
+  const [groupId, setGroupId] = React.useState("");
+  const [status, setStatus] = React.useState<StatusFilter>("all");
   const [limit, setLimit] = React.useState(50);
   const [offset, setOffset] = React.useState(0);
 
-  const listQuery = React.useMemo(() => ({ limit, offset }), [limit, offset]);
+  // Filter setters reset offset in the same update so no request goes out with
+  // a stale offset.
+  const onQChange = (v: string) => {
+    setQ(v);
+    setOffset(0);
+  };
+  const onGroupChange = (v: string) => {
+    setGroupId(v);
+    setOffset(0);
+  };
+  const onStatusChange = (v: StatusFilter) => {
+    setStatus(v);
+    setOffset(0);
+  };
+  const clearFilters = () => {
+    setQ("");
+    setGroupId("");
+    setStatus("all");
+    setOffset(0);
+  };
+
+  // Each search request makes the server sync and re-filter every agent, so
+  // wait for typing to pause before querying.
+  const searchQ = useDebouncedValue(q.trim(), SEARCH_DEBOUNCE_MS);
+  const listQuery = React.useMemo(
+    () => ({
+      q: searchQ || undefined,
+      groupId: groupId || undefined,
+      online: status === "all" ? undefined : status === "online",
+      limit,
+      offset,
+    }),
+    [searchQ, groupId, status, limit, offset],
+  );
+  const hasFilters =
+    listQuery.q !== undefined || listQuery.groupId !== undefined || listQuery.online !== undefined;
+
   const agentsQuery = useAdminAgents(listQuery);
+  const groups = useAdminGroups().data ?? [];
 
   const invalidateAgents = React.useCallback(async () => {
     await Promise.all([
@@ -327,32 +204,12 @@ export function AgentsPage() {
     onSuccess: invalidateAgents,
   });
 
-  const reorder = useMutation({
+  const reorder = useReorderMutation({
+    listKey: ["admin", "agents"],
+    queryKey: ["admin", "agents", listQuery],
+    field: "agents",
     mutationFn: reorderAdminAgents,
-    async onMutate(agentIds) {
-      await queryClient.cancelQueries({ queryKey: ["admin", "agents"] });
-      const queryKey = ["admin", "agents", listQuery];
-      const prev = queryClient.getQueryData<AdminAgentsResponse>(queryKey);
-      if (prev) {
-        const orderMap = new Map(agentIds.map((id, i) => [id, i]));
-        queryClient.setQueryData<AdminAgentsResponse>(queryKey, {
-          ...prev,
-          agents: [...prev.agents].sort(
-            (a, b) => (orderMap.get(a.id) ?? 0) - (orderMap.get(b.id) ?? 0),
-          ),
-        });
-      }
-      return { prev };
-    },
-    onError(_err, _vars, ctx) {
-      if (ctx?.prev) {
-        queryClient.setQueryData(["admin", "agents", listQuery], ctx.prev);
-      }
-      toast.error(t("agents.reorderFailed"));
-    },
-    async onSettled() {
-      await queryClient.invalidateQueries({ queryKey: ["admin", "agents"] });
-    },
+    errorMessage: t("agents.reorderFailed"),
   });
 
   const [createOpen, setCreateOpen] = React.useState(false);
@@ -368,10 +225,21 @@ export function AgentsPage() {
 
   const agents = agentsQuery.data?.agents ?? [];
   const total = agentsQuery.data?.total ?? 0;
-  // Reorder rewrites displayOrder for the visible set; disable drag when the
-  // server returned a truncated slice so it can't clobber off-screen rows.
+  const onlineCount = agents.filter((a) => a.status.online).length;
+  // Reorder rewrites displayOrder for the visible set; disable drag when filters
+  // are active, the slice is truncated, or the previous query's rows are still
+  // shown, otherwise it would clobber rows that aren't on screen.
   const isTruncated = total > agents.length;
-  const canDrag = !isTruncated;
+  const canDrag = !hasFilters && !isTruncated && !agentsQuery.isPlaceholderData;
+  // The online count needs the whole set, and under a status filter it would
+  // only ever be all or none of the total.
+  const showOnlineCount = !isTruncated && listQuery.online === undefined;
+
+  const statusItems = [
+    { value: "all", label: t("common.all") },
+    { value: "online", label: t("common.online") },
+    { value: "offline", label: t("common.offline") },
+  ] as const;
 
   const handleDeleteAgent = (agentId: string) => {
     void confirm({
@@ -384,67 +252,44 @@ export function AgentsPage() {
     });
   };
 
-  const sortableContainerRef = React.useRef<HTMLElement | null>(null);
-  const setSortableContainerRef = React.useCallback((node: HTMLElement | null) => {
-    sortableContainerRef.current = node;
-  }, []);
-
-  const restrictToSortableContainer = React.useCallback<Modifier>(
-    ({ draggingNodeRect, transform }) => {
-      const container = sortableContainerRef.current?.getBoundingClientRect();
-      if (!draggingNodeRect || !container) {
-        return { ...transform, x: 0 };
-      }
-      const minY = container.top - draggingNodeRect.top;
-      const maxY = container.bottom - draggingNodeRect.bottom;
-      return { ...transform, x: 0, y: Math.min(Math.max(transform.y, minY), maxY) };
-    },
-    [],
-  );
-
-  const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
-    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
-  );
-
-  function handleDragEnd(event: DragEndEvent) {
-    const { active, over } = event;
-    if (!over || active.id === over.id) return;
-
-    const oldIndex = agents.findIndex((a) => a.id === active.id);
-    const newIndex = agents.findIndex((a) => a.id === over.id);
-    if (oldIndex === -1 || newIndex === -1) return;
-
-    const reordered = arrayMove(agents, oldIndex, newIndex);
-    reorder.mutate(reordered.map((a) => a.id));
-  }
-
   return (
     <div className="space-y-4">
-      <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-        <div>
-          <div className="text-xl font-semibold">{t("agents.title")}</div>
-        </div>
-        <Dialog open={createOpen} onOpenChange={setCreateOpen}>
-          <DialogTrigger asChild>
-            <Button>{t("agents.createAgent")}</Button>
-          </DialogTrigger>
-          <DialogContent scrollBehavior="viewport">
-            <DialogHeader>
-              <DialogTitle>{t("agents.createDialog.title")}</DialogTitle>
-            </DialogHeader>
+      <AdminPageHeader
+        title={t("agents.title")}
+        description={
+          agentsQuery.isLoading ? (
+            <Skeleton className="h-4 w-28" />
+          ) : showOnlineCount ? (
+            t("agents.summary", { total, online: onlineCount })
+          ) : (
+            t("agents.summaryTotal", { total })
+          )
+        }
+        actions={
+          <Dialog open={createOpen} onOpenChange={setCreateOpen}>
+            <DialogTrigger asChild>
+              <Button>
+                <Plus data-icon="inline-start" />
+                {t("agents.createAgent")}
+              </Button>
+            </DialogTrigger>
+            <DialogContent scrollBehavior="viewport">
+              <DialogHeader>
+                <DialogTitle>{t("agents.createDialog.title")}</DialogTitle>
+              </DialogHeader>
 
-            <CreateAgentForm
-              pending={createAgent.isPending}
-              onSubmit={async (v) => {
-                const res = await createAgent.mutateAsync(v);
-                setCreateOpen(false);
-                setDeployTarget({ agentId: res.id, agentName: v.name, token: res.token });
-              }}
-            />
-          </DialogContent>
-        </Dialog>
-      </div>
+              <CreateAgentForm
+                pending={createAgent.isPending}
+                onSubmit={async (v) => {
+                  const res = await createAgent.mutateAsync(v);
+                  setCreateOpen(false);
+                  setDeployTarget({ agentId: res.id, agentName: v.name, token: res.token });
+                }}
+              />
+            </DialogContent>
+          </Dialog>
+        }
+      />
 
       {agentsQuery.isError ? (
         <QueryErrorCard
@@ -456,79 +301,105 @@ export function AgentsPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle>{t("agents.title")}</CardTitle>
-          <CardDescription>
-            {agentsQuery.isLoading ? (
-              <Skeleton className="inline-block h-4 w-16 align-middle" />
-            ) : (
-              t("agents.shownTotal", { shown: agents.length, total })
-            )}
-          </CardDescription>
+          <div className="flex flex-wrap items-center gap-2">
+            <AdminSearchInput
+              value={q}
+              onChange={(e) => onQChange(e.target.value)}
+              placeholder={t("agents.searchPlaceholder")}
+            />
+            {groups.length > 0 ? (
+              <Select
+                value={groupId || ALL_GROUPS}
+                onValueChange={(v) => onGroupChange(v === ALL_GROUPS ? "" : v)}
+              >
+                <SelectTrigger className="w-full sm:w-40" aria-label={t("agents.allGroups")}>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={ALL_GROUPS}>{t("agents.allGroups")}</SelectItem>
+                  {groups.map((g) => (
+                    <SelectItem key={g.id} value={g.id}>
+                      {g.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            ) : null}
+            <AdminFilterTabs value={status} onChange={onStatusChange} items={statusItems} />
+            {hasFilters ? (
+              <Button variant="ghost" size="sm" onClick={clearFilters}>
+                <X data-icon="inline-start" />
+                {t("common.clear")}
+              </Button>
+            ) : null}
+          </div>
         </CardHeader>
         <CardContent>
-          <DndContext
-            sensors={sensors}
-            collisionDetection={closestCenter}
-            modifiers={canDrag ? [restrictToSortableContainer] : undefined}
-            onDragEnd={handleDragEnd}
+          <AdminList
+            grid={AGENT_GRID}
+            columns={[
+              "",
+              t("agents.table.node"),
+              t("agents.table.ip"),
+              t("agents.filters.tags"),
+              t("agents.table.status"),
+              "",
+            ]}
+            count={agents.length}
+            loading={agentsQuery.isLoading}
+            empty={
+              agentsQuery.isError ? null : hasFilters ? t("common.noMatches") : t("agents.empty")
+            }
           >
-            <SortableContext items={agents.map((a) => a.id)} strategy={verticalListSortingStrategy}>
-              {!isDesktop ? (
-                <div ref={setSortableContainerRef}>
-                  {agents.map((a) => (
-                    <SortableAgentRowCompact
-                      key={a.id}
-                      agent={a}
-                      draggable={canDrag}
+            <SortableList ids={agents.map((a) => a.id)} onReorder={(ids) => reorder.mutate(ids)}>
+              {agents.map((a) => (
+                <SortableRow
+                  key={a.id}
+                  id={a.id}
+                  draggable={canDrag}
+                  grid={AGENT_GRID}
+                  primary={<AgentIdentity agent={a} />}
+                  cells={[
+                    <AgentIpList
+                      status={a.status}
+                      className="flex-row flex-wrap gap-x-4 @2xl/list:flex-col"
+                    />,
+                    a.tags.length > 0 ? (
+                      <div className="flex flex-wrap gap-1">
+                        {a.tags.map((tag) => (
+                          <TagBadge key={tag} tag={tag} />
+                        ))}
+                      </div>
+                    ) : null,
+                  ]}
+                  aside={<AgentStatus status={a.status} />}
+                  actions={
+                    <RowActions
                       onEdit={() => {
                         setEditing(a);
                         setEditOpen(true);
                       }}
-                      onDeploy={() => {
-                        setDeployTarget({ agentId: a.id, agentName: a.name, token: null });
-                      }}
-                      onDelete={() => handleDeleteAgent(a.id)}
-                      deleteDisabled={deleteAgent.isPending}
+                      menu={[
+                        {
+                          label: t("agents.deploy.button"),
+                          icon: SquareTerminal,
+                          onSelect: () =>
+                            setDeployTarget({ agentId: a.id, agentName: a.name, token: null }),
+                        },
+                        {
+                          label: t("common.delete"),
+                          icon: Trash2,
+                          destructive: true,
+                          disabled: deleteAgent.isPending,
+                          onSelect: () => handleDeleteAgent(a.id),
+                        },
+                      ]}
                     />
-                  ))}
-                </div>
-              ) : (
-                <div className="overflow-x-auto">
-                  <Table className="table-fixed">
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead className="w-8 px-1" />
-                        <TableHead>{t("agents.table.name")}</TableHead>
-                        <TableHead className="w-44">{t("agents.table.ip")}</TableHead>
-                        <TableHead>{t("agents.filters.tags")}</TableHead>
-                        <TableHead className="w-28">{t("agents.table.group")}</TableHead>
-                        <TableHead className="w-24">{t("agents.table.version")}</TableHead>
-                        <TableHead className="w-52">{t("agents.table.actions")}</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody ref={setSortableContainerRef}>
-                      {agents.map((a) => (
-                        <SortableAgentRow
-                          key={a.id}
-                          agent={a}
-                          draggable={canDrag}
-                          onEdit={() => {
-                            setEditing(a);
-                            setEditOpen(true);
-                          }}
-                          onDeploy={() => {
-                            setDeployTarget({ agentId: a.id, agentName: a.name, token: null });
-                          }}
-                          onDelete={() => handleDeleteAgent(a.id)}
-                          deleteDisabled={deleteAgent.isPending}
-                        />
-                      ))}
-                    </TableBody>
-                  </Table>
-                </div>
-              )}
-            </SortableContext>
-          </DndContext>
+                  }
+                />
+              ))}
+            </SortableList>
+          </AdminList>
           <AdminPagination
             className="mt-4"
             total={total}

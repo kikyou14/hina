@@ -15,6 +15,7 @@ import { getUserErrorMessage } from "@/lib/userErrors";
 import { LogsPanel } from "@/pages/admin/LogsPanel";
 import { useAdminSiteConfig } from "@/queries/adminSiteConfig";
 import { useAdminRuntimeConfig } from "@/queries/adminSystem";
+import { AdminPageHeader } from "./components/AdminPageHeader";
 import { AsnDbPanel } from "./components/AsnDbPanel";
 import { DbPanel } from "./components/DbPanel";
 import { HideTracerouteToggle } from "./components/HideTracerouteToggle";
@@ -54,9 +55,7 @@ export function SettingsPage() {
 
   return (
     <div className="space-y-4">
-      <div>
-        <div className="text-xl font-semibold">{t("settings.title")}</div>
-      </div>
+      <AdminPageHeader title={t("settings.title")} />
 
       <Tabs value={tab} onValueChange={setTab}>
         <AnimatedTabsList

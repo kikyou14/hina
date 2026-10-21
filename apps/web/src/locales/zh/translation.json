@@ -18,8 +18,6 @@
     "confirmDelete": "确认删除",
     "clear": "清除",
     "all": "全部",
-    "true": "是",
-    "false": "否",
     "enable": "启用",
     "enabled": "已启用",
     "disabled": "已禁用",
@@ -42,6 +40,9 @@
       "system": "跟随系统"
     },
     "noData": "无数据",
+    "noMatches": "没有符合筛选条件的结果。",
+    "moreActions": "更多操作",
+    "dragToReorder": "拖动排序",
     "optional": "可选",
     "test": "测试",
     "error": "操作失败",
@@ -138,17 +139,20 @@
       "title": "创建节点"
     },
     "filters": {
-      "tags": "标签",
-      "enabled": "启用"
+      "tags": "标签"
     },
     "table": {
-      "name": "名称",
-      "group": "分组",
+      "node": "节点",
       "ip": "IP",
-      "version": "版本",
-      "actions": "操作"
+      "status": "状态"
     },
-    "shownTotal": "已显示 {{shown}} / 共 {{total}} 个",
+    "summary": "共 {{total}} 个 · {{online}} 在线",
+    "summaryTotal": "共 {{total}} 个",
+    "searchPlaceholder": "搜索名称、IP、分组或备注",
+    "allGroups": "全部分组",
+    "ungrouped": "未分组",
+    "neverConnected": "从未连接",
+    "empty": "还没有节点，点击右上角「创建节点」添加第一个。",
     "editDialog": {
       "title": "编辑节点"
     },
@@ -173,7 +177,6 @@
     "deleteConfirm": "确定要删除节点吗？此操作不可恢复，并将删除该节点的所有历史数据。",
     "deleteFailed": "删除节点失败。",
     "reorderFailed": "保存排序失败。",
-    "dragToReorder": "拖动排序",
     "form": {
       "groupByName": "分组（按名称）",
       "note": "备注",
@@ -238,19 +241,15 @@
       "notifications": "通知"
     },
     "active": {
-      "title": "活跃告警",
       "count": "{{count}} 个活跃",
       "severity": "严重级别",
       "rule": "规则",
-      "kind": "类型",
       "agent": "节点",
       "activeSince": "活跃时间",
       "value": "值"
     },
     "notifications": {
-      "title": "通知发件箱",
       "count": "{{count}} 条",
-      "allStatuses": "全部状态",
       "status": "状态",
       "kind": "类型",
       "firing": "触发",
@@ -258,7 +257,6 @@
       "rule": "规则",
       "channel": "渠道",
       "event": "事件",
-      "error": "错误",
       "statuses": {
         "pending": "待发送",
         "sent": "已发送",
@@ -343,10 +341,8 @@
     "table": {
       "name": "名称",
       "kind": "类型",
-      "target": "目标",
       "interval": "间隔",
       "status": "状态",
-      "actions": "操作",
       "agents": "{{count}} 个节点"
     },
     "tcpUnsupported": {
@@ -504,14 +500,11 @@
         "title": "编辑渠道"
       },
       "table": {
-        "title": "告警渠道",
         "count": "{{count}} 个渠道",
         "name": "名称",
         "type": "类型",
         "status": "状态",
-        "config": "配置",
-        "updated": "更新时间",
-        "actions": "操作"
+        "updated": "更新时间"
       },
       "testSent": "测试已发送。",
       "testFailed": "测试失败。",
@@ -527,16 +520,13 @@
         "title": "编辑规则"
       },
       "table": {
-        "title": "告警规则",
         "count": "{{count}} 条规则",
         "name": "名称",
         "severity": "严重级别",
-        "kind": "类型",
         "status": "状态",
         "delay": "延迟",
         "channels": "渠道",
-        "updated": "更新时间",
-        "actions": "操作"
+        "updated": "更新时间"
       },
       "deleteConfirm": "确定要删除此规则吗？",
       "deleteFailed": "删除规则失败。"

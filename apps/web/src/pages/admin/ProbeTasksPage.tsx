@@ -1,38 +1,18 @@
-import {
-  DndContext,
-  closestCenter,
-  KeyboardSensor,
-  PointerSensor,
-  useSensor,
-  useSensors,
-  type DragEndEvent,
-  type Modifier,
-} from "@dnd-kit/core";
-import {
-  SortableContext,
-  arrayMove,
-  sortableKeyboardCoordinates,
-  useSortable,
-  verticalListSortingStrategy,
-} from "@dnd-kit/sortable";
-import { CSS } from "@dnd-kit/utilities";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, GripVertical } from "lucide-react";
+import { AlertTriangle, Plus, Trash2, X } from "lucide-react";
 import * as React from "react";
 import { useTranslation } from "react-i18next";
 
-import { toast } from "sonner";
 import {
   createAdminProbeTask,
   deleteAdminProbeTask,
   patchAdminProbeTask,
   reorderAdminProbeTasks,
 } from "@/api/adminProbes";
-import type { AdminProbeTask, AdminProbeTasksResponse, ProbeKind } from "@/api/adminProbes";
+import type { AdminProbeTask, ProbeKind } from "@/api/adminProbes";
 import { AdminPagination } from "@/components/AdminPagination";
 import { useConfirm } from "@/components/ConfirmDialog";
 import { QueryErrorCard } from "@/components/QueryErrorCard";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import {
@@ -42,7 +22,6 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
 import {
   Select,
   SelectContent,
@@ -50,36 +29,28 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
+import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
-import { useMediaQuery } from "@/hooks/useMediaQuery";
 import { formatProbeTarget } from "@/lib/probes";
 import { useAdminAgentOptions } from "@/queries/adminAgents";
 import { invalidateAdminGroups, useAdminGroups } from "@/queries/adminGroups";
 import { useAdminProbeTasks } from "@/queries/adminProbes";
+import { EnabledBadge, ProbeKindBadge } from "./components/AdminBadges";
+import { AdminFilterTabs, AdminList, AdminSearchInput } from "./components/AdminList";
+import { AdminPageHeader } from "./components/AdminPageHeader";
 import { ProbeTaskForm } from "./components/ProbeTaskForm";
+import { RowActions } from "./components/RowActions";
+import { SortableList, SortableRow } from "./components/SortableList";
 import { SELECT_ALL_VALUE } from "./lib/probeValidation";
-import { ProbeTasksPageSkeleton } from "./ProbeTasksPage.skeleton";
+import { useReorderMutation } from "./lib/reorder";
 
-const MD_QUERY = "(min-width: 768px)";
+// Tracks: handle, task, kind, interval, scope, status, actions.
+const PROBE_GRID =
+  "@2xl/list:grid-cols-[1.5rem_minmax(0,1.4fr)_5.5rem_3.5rem_minmax(0,0.8fr)_4.5rem_4.25rem]";
 
-const PROBE_KIND_STYLES: Record<ProbeKind, string> = {
-  icmp: "bg-blue-100 text-blue-700 dark:bg-blue-900/50 dark:text-blue-300",
-  tcp: "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/50 dark:text-emerald-300",
-  http: "bg-purple-100 text-purple-700 dark:bg-purple-900/50 dark:text-purple-300",
-  traceroute: "bg-amber-100 text-amber-700 dark:bg-amber-900/50 dark:text-amber-300",
-};
+type EnabledFilter = "all" | "enabled" | "disabled";
 
-function ProbeKindBadge({ kind }: { kind: ProbeKind }) {
-  return <Badge className={PROBE_KIND_STYLES[kind]}>{kind}</Badge>;
-}
+const SEARCH_DEBOUNCE_MS = 250;
 
 function ProbeScope({ task: tsk }: { task: AdminProbeTask }) {
   const { t } = useTranslation();
@@ -98,8 +69,8 @@ function ProbeTcpUnsupportedWarning({ task: tsk }: { task: AdminProbeTask }) {
     <span
       className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] font-medium ${
         runsNowhere
-          ? "bg-red-100 text-red-700 dark:bg-red-900/50 dark:text-red-300"
-          : "bg-amber-100 text-amber-700 dark:bg-amber-900/50 dark:text-amber-300"
+          ? "bg-red-500/10 text-red-600 dark:text-red-400"
+          : "bg-amber-500/10 text-amber-600 dark:text-amber-400"
       }`}
       title={
         runsNowhere
@@ -121,190 +92,34 @@ function ProbeTcpUnsupportedWarning({ task: tsk }: { task: AdminProbeTask }) {
   );
 }
 
-function ProbeStatusBadge({ enabled }: { enabled: boolean }) {
-  const { t } = useTranslation();
-  return enabled ? (
-    <Badge className="bg-green-100 text-green-700 dark:bg-green-900/50 dark:text-green-300">
-      {t("common.enabled")}
-    </Badge>
-  ) : (
-    <Badge variant="destructive">{t("common.disabled")}</Badge>
-  );
-}
-
-function ProbeActions({ onEdit, onDelete }: { onEdit: () => void; onDelete: () => void }) {
-  const { t } = useTranslation();
+function ProbeTaskIdentity({ task: tsk }: { task: AdminProbeTask }) {
+  const target = formatProbeTarget(tsk.kind as ProbeKind, tsk.target);
   return (
-    <div className="flex flex-wrap gap-2">
-      <Button variant="outline" size="sm" onClick={onEdit}>
-        {t("common.edit")}
-      </Button>
-      <Button variant="destructive" size="sm" onClick={onDelete}>
-        {t("common.delete")}
-      </Button>
-    </div>
-  );
-}
-
-function SortableProbeTaskRowCompact({
-  task: tsk,
-  onEdit,
-  onDelete,
-  draggable,
-}: {
-  task: AdminProbeTask;
-  onEdit: () => void;
-  onDelete: () => void;
-  draggable: boolean;
-}) {
-  const {
-    attributes,
-    listeners,
-    setNodeRef,
-    setActivatorNodeRef,
-    transform,
-    transition,
-    isDragging,
-  } = useSortable({ id: tsk.id, disabled: !draggable });
-
-  const style: React.CSSProperties = {
-    transform: CSS.Transform.toString(transform),
-    transition,
-    opacity: isDragging ? 0.5 : undefined,
-  };
-
-  return (
-    <div
-      ref={setNodeRef}
-      style={style}
-      {...attributes}
-      className="border-b px-4 py-3 last:border-b-0"
-    >
-      <div className="flex items-center gap-2">
-        {draggable ? (
-          <button
-            ref={setActivatorNodeRef}
-            {...listeners}
-            className="text-muted-foreground hover:text-foreground flex cursor-grab items-center justify-center rounded p-1 active:cursor-grabbing"
-            tabIndex={-1}
-          >
-            <GripVertical className="size-4" />
-          </button>
-        ) : (
-          <div className="w-6" />
-        )}
-        <span className="min-w-0 truncate font-medium">{tsk.name}</span>
-        <div className="ml-auto flex shrink-0 items-center gap-2">
-          <ProbeKindBadge kind={tsk.kind as ProbeKind} />
-          <ProbeStatusBadge enabled={tsk.enabled} />
-        </div>
+    <>
+      <div className="truncate text-sm font-medium" title={tsk.name}>
+        {tsk.name}
       </div>
-
-      <div
-        className="text-muted-foreground mt-1.5 pl-8 font-mono text-xs"
-        title={formatProbeTarget(tsk.kind as ProbeKind, tsk.target)}
-      >
-        <span className="line-clamp-1">{formatProbeTarget(tsk.kind as ProbeKind, tsk.target)}</span>
+      <div className="text-muted-foreground mt-0.5 truncate font-mono leading-4" title={target}>
+        {target}
       </div>
-
-      <div className="text-muted-foreground mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 pl-8 text-xs">
-        <span>{tsk.intervalSec}s</span>
-        <span>
-          <ProbeScope task={tsk} />
-        </span>
-        <ProbeTcpUnsupportedWarning task={tsk} />
-      </div>
-
-      <div className="mt-3 pl-8">
-        <ProbeActions onEdit={onEdit} onDelete={onDelete} />
-      </div>
-    </div>
-  );
-}
-
-function SortableProbeTaskRow({
-  task: tsk,
-  onEdit,
-  onDelete,
-  draggable,
-}: {
-  task: AdminProbeTask;
-  onEdit: () => void;
-  onDelete: () => void;
-  draggable: boolean;
-}) {
-  const {
-    attributes,
-    listeners,
-    setNodeRef,
-    setActivatorNodeRef,
-    transform,
-    transition,
-    isDragging,
-  } = useSortable({ id: tsk.id, disabled: !draggable });
-
-  const style: React.CSSProperties = {
-    transform: CSS.Transform.toString(transform),
-    transition,
-    opacity: isDragging ? 0.5 : undefined,
-  };
-
-  return (
-    <TableRow ref={setNodeRef} style={style} {...attributes}>
-      <TableCell className="w-8 px-1">
-        {draggable ? (
-          <button
-            ref={setActivatorNodeRef}
-            {...listeners}
-            className="text-muted-foreground hover:text-foreground flex cursor-grab items-center justify-center rounded p-1 active:cursor-grabbing"
-            tabIndex={-1}
-          >
-            <GripVertical className="size-4" />
-          </button>
-        ) : null}
-      </TableCell>
-      <TableCell className="font-medium">{tsk.name}</TableCell>
-      <TableCell>
-        <ProbeKindBadge kind={tsk.kind as ProbeKind} />
-      </TableCell>
-      <TableCell
-        className="truncate font-mono text-xs"
-        title={formatProbeTarget(tsk.kind as ProbeKind, tsk.target)}
-      >
-        {formatProbeTarget(tsk.kind as ProbeKind, tsk.target)}
-      </TableCell>
-      <TableCell>{tsk.intervalSec}s</TableCell>
-      <TableCell className="text-xs">
-        <div className="flex flex-col items-start gap-1">
-          <ProbeScope task={tsk} />
-          <ProbeTcpUnsupportedWarning task={tsk} />
-        </div>
-      </TableCell>
-      <TableCell>
-        <ProbeStatusBadge enabled={tsk.enabled} />
-      </TableCell>
-      <TableCell>
-        <ProbeActions onEdit={onEdit} onDelete={onDelete} />
-      </TableCell>
-    </TableRow>
+    </>
   );
 }
 
 export function ProbeTasksPage() {
   const { t } = useTranslation();
   useDocumentTitle(t("probes.title"));
-  const isDesktop = useMediaQuery(MD_QUERY);
   const queryClient = useQueryClient();
   const confirm = useConfirm();
 
   const [q, setQ] = React.useState("");
   const [kind, setKind] = React.useState<ProbeKind | "">("");
-  const [enabled, setEnabled] = React.useState<boolean | null>(null);
+  const [enabled, setEnabled] = React.useState<EnabledFilter>("all");
   const [limit, setLimit] = React.useState(50);
   const [offset, setOffset] = React.useState(0);
 
-  // Filter setters reset offset synchronously so the query memo doesn't fire one
-  // request with the stale offset before a useEffect catches up.
+  // Filter setters reset offset in the same update so no request goes out with
+  // a stale offset.
   const onQChange = (v: string) => {
     setQ(v);
     setOffset(0);
@@ -313,20 +128,28 @@ export function ProbeTasksPage() {
     setKind(v);
     setOffset(0);
   };
-  const onEnabledChange = (v: boolean | null) => {
+  const onEnabledChange = (v: EnabledFilter) => {
     setEnabled(v);
     setOffset(0);
   };
+  const clearFilters = () => {
+    setQ("");
+    setKind("");
+    setEnabled("all");
+    setOffset(0);
+  };
 
+  // Wait for typing to pause so each keystroke doesn't send a request.
+  const searchQ = useDebouncedValue(q.trim(), SEARCH_DEBOUNCE_MS);
   const query = React.useMemo(() => {
     return {
-      q: q.trim() || undefined,
+      q: searchQ || undefined,
       kind: kind || undefined,
-      enabled: enabled === null ? undefined : enabled,
+      enabled: enabled === "all" ? undefined : enabled === "enabled",
       limit,
       offset,
     };
-  }, [q, kind, enabled, limit, offset]);
+  }, [searchQ, kind, enabled, limit, offset]);
 
   const hasFilters = !!(query.q || query.kind || query.enabled !== undefined);
 
@@ -375,32 +198,12 @@ export function ProbeTasksPage() {
     });
   };
 
-  const reorder = useMutation({
+  const reorder = useReorderMutation({
+    listKey: ["admin", "probeTasks"],
+    queryKey: ["admin", "probeTasks", query],
+    field: "tasks",
     mutationFn: reorderAdminProbeTasks,
-    async onMutate(taskIds) {
-      await queryClient.cancelQueries({ queryKey: ["admin", "probeTasks"] });
-      const queryKey = ["admin", "probeTasks", query];
-      const prev = queryClient.getQueryData<AdminProbeTasksResponse>(queryKey);
-      if (prev) {
-        const orderMap = new Map(taskIds.map((id, i) => [id, i]));
-        queryClient.setQueryData<AdminProbeTasksResponse>(queryKey, {
-          ...prev,
-          tasks: [...prev.tasks].sort(
-            (a, b) => (orderMap.get(a.id) ?? 0) - (orderMap.get(b.id) ?? 0),
-          ),
-        });
-      }
-      return { prev };
-    },
-    onError(_err, _vars, ctx) {
-      if (ctx?.prev) {
-        queryClient.setQueryData(["admin", "probeTasks", query], ctx.prev);
-      }
-      toast.error(t("probes.reorderFailed"));
-    },
-    async onSettled() {
-      await queryClient.invalidateQueries({ queryKey: ["admin", "probeTasks"] });
-    },
+    errorMessage: t("probes.reorderFailed"),
   });
 
   const [createOpen, setCreateOpen] = React.useState(false);
@@ -410,55 +213,28 @@ export function ProbeTasksPage() {
   const tasks = tasksQuery.data?.tasks ?? [];
   const total = tasksQuery.data?.total ?? 0;
   // Reorder rewrites displayOrder for the visible set; disable drag when filters
-  // are active or the slice is truncated, otherwise it would clobber off-screen rows.
+  // are active, the slice is truncated, or the previous query's rows are still
+  // shown, otherwise it would clobber rows that aren't on screen.
   const isTruncated = total > tasks.length;
-  const canDrag = !hasFilters && !isTruncated;
+  const canDrag = !hasFilters && !isTruncated && !tasksQuery.isPlaceholderData;
 
-  const sortableContainerRef = React.useRef<HTMLElement | null>(null);
-  const setSortableContainerRef = React.useCallback((node: HTMLElement | null) => {
-    sortableContainerRef.current = node;
-  }, []);
-
-  const restrictToSortableContainer = React.useCallback<Modifier>(
-    ({ draggingNodeRect, transform }) => {
-      const container = sortableContainerRef.current?.getBoundingClientRect();
-      if (!draggingNodeRect || !container) {
-        return { ...transform, x: 0 };
-      }
-      const minY = container.top - draggingNodeRect.top;
-      const maxY = container.bottom - draggingNodeRect.bottom;
-      return { ...transform, x: 0, y: Math.min(Math.max(transform.y, minY), maxY) };
-    },
-    [],
-  );
-
-  const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
-    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
-  );
-
-  function handleDragEnd(event: DragEndEvent) {
-    const { active, over } = event;
-    if (!over || active.id === over.id) return;
-
-    const oldIndex = tasks.findIndex((t) => t.id === active.id);
-    const newIndex = tasks.findIndex((t) => t.id === over.id);
-    if (oldIndex === -1 || newIndex === -1) return;
-
-    const reordered = arrayMove(tasks, oldIndex, newIndex);
-    reorder.mutate(reordered.map((t) => t.id));
-  }
+  const enabledItems = [
+    { value: "all", label: t("common.all") },
+    { value: "enabled", label: t("common.enabled") },
+    { value: "disabled", label: t("common.disabled") },
+  ] as const;
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-        <div>
-          <div className="text-xl font-semibold">{t("probes.title")}</div>
-        </div>
-        <div className="flex items-center gap-2">
+      <AdminPageHeader
+        title={t("probes.title")}
+        actions={
           <Dialog open={createOpen} onOpenChange={setCreateOpen}>
             <DialogTrigger asChild>
-              <Button>{t("probes.createTask")}</Button>
+              <Button>
+                <Plus data-icon="inline-start" />
+                {t("probes.createTask")}
+              </Button>
             </DialogTrigger>
             <DialogContent className="max-w-sm" scrollBehavior="viewport">
               <DialogHeader>
@@ -476,8 +252,8 @@ export function ProbeTasksPage() {
               />
             </DialogContent>
           </Dialog>
-        </div>
-      </div>
+        }
+      />
 
       {tasksQuery.isError ? (
         <QueryErrorCard
@@ -489,9 +265,8 @@ export function ProbeTasksPage() {
 
       <Card>
         <CardHeader>
-          <div className="flex flex-wrap items-center gap-3">
-            <Input
-              className="w-full sm:w-60"
+          <div className="flex flex-wrap items-center gap-2">
+            <AdminSearchInput
               value={q}
               onChange={(e) => onQChange(e.target.value)}
               placeholder={t("probes.filters.taskNamePlaceholder")}
@@ -511,88 +286,73 @@ export function ProbeTasksPage() {
                 <SelectItem value="traceroute">traceroute</SelectItem>
               </SelectContent>
             </Select>
-            <Select
-              value={enabled === null ? "" : enabled ? "true" : "false"}
-              onValueChange={(v) => {
-                if (!v || v === SELECT_ALL_VALUE) return onEnabledChange(null);
-                onEnabledChange(v === "true");
-              }}
-            >
-              <SelectTrigger className="w-full sm:w-32">
-                <SelectValue placeholder={t("agents.filters.enabled")} />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value={SELECT_ALL_VALUE}>{t("common.all")}</SelectItem>
-                <SelectItem value="true">{t("common.true")}</SelectItem>
-                <SelectItem value="false">{t("common.false")}</SelectItem>
-              </SelectContent>
-            </Select>
+            <AdminFilterTabs value={enabled} onChange={onEnabledChange} items={enabledItems} />
+            {hasFilters ? (
+              <Button variant="ghost" size="sm" onClick={clearFilters}>
+                <X data-icon="inline-start" />
+                {t("common.clear")}
+              </Button>
+            ) : null}
           </div>
         </CardHeader>
         <CardContent>
-          {tasksQuery.isLoading ? (
-            <ProbeTasksPageSkeleton />
-          ) : (
-            <DndContext
-              sensors={sensors}
-              collisionDetection={closestCenter}
-              modifiers={canDrag ? [restrictToSortableContainer] : undefined}
-              onDragEnd={handleDragEnd}
-            >
-              <SortableContext
-                items={tasks.map((t) => t.id)}
-                strategy={verticalListSortingStrategy}
-              >
-                {!isDesktop ? (
-                  <div ref={setSortableContainerRef}>
-                    {tasks.map((tsk) => (
-                      <SortableProbeTaskRowCompact
-                        key={tsk.id}
-                        task={tsk}
-                        draggable={canDrag}
-                        onEdit={() => {
-                          setEditing(tsk);
-                          setEditOpen(true);
-                        }}
-                        onDelete={() => handleDeleteTask(tsk.id)}
-                      />
-                    ))}
-                  </div>
-                ) : (
-                  <div className="overflow-x-auto">
-                    <Table className="table-fixed">
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead className="w-8 px-1" />
-                          <TableHead className="w-32">{t("probes.table.name")}</TableHead>
-                          <TableHead className="w-24">{t("probes.table.kind")}</TableHead>
-                          <TableHead className="w-48">{t("probes.table.target")}</TableHead>
-                          <TableHead className="w-16">{t("probes.table.interval")}</TableHead>
-                          <TableHead className="w-24">{t("probes.form.agents")}</TableHead>
-                          <TableHead className="w-20">{t("probes.table.status")}</TableHead>
-                          <TableHead className="w-28">{t("probes.table.actions")}</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody ref={setSortableContainerRef}>
-                        {tasks.map((tsk) => (
-                          <SortableProbeTaskRow
-                            key={tsk.id}
-                            task={tsk}
-                            draggable={canDrag}
-                            onEdit={() => {
-                              setEditing(tsk);
-                              setEditOpen(true);
-                            }}
-                            onDelete={() => handleDeleteTask(tsk.id)}
-                          />
-                        ))}
-                      </TableBody>
-                    </Table>
-                  </div>
-                )}
-              </SortableContext>
-            </DndContext>
-          )}
+          <AdminList
+            grid={PROBE_GRID}
+            columns={[
+              "",
+              t("probes.table.name"),
+              t("probes.table.kind"),
+              t("probes.table.interval"),
+              t("probes.form.agents"),
+              t("probes.table.status"),
+              "",
+            ]}
+            count={tasks.length}
+            loading={tasksQuery.isLoading}
+            empty={
+              tasksQuery.isError ? null : hasFilters ? t("common.noMatches") : t("common.noData")
+            }
+          >
+            <SortableList ids={tasks.map((tsk) => tsk.id)} onReorder={(ids) => reorder.mutate(ids)}>
+              {tasks.map((tsk) => (
+                <SortableRow
+                  key={tsk.id}
+                  id={tsk.id}
+                  draggable={canDrag}
+                  grid={PROBE_GRID}
+                  primary={<ProbeTaskIdentity task={tsk} />}
+                  cells={[
+                    <ProbeKindBadge kind={tsk.kind as ProbeKind} />,
+                    <span className="tabular-nums">{tsk.intervalSec}s</span>,
+                    <div className="flex flex-col items-start gap-1">
+                      <span className="max-w-full truncate">
+                        <ProbeScope task={tsk} />
+                      </span>
+                      <ProbeTcpUnsupportedWarning task={tsk} />
+                    </div>,
+                  ]}
+                  aside={<EnabledBadge enabled={tsk.enabled} />}
+                  actions={
+                    <RowActions
+                      onEdit={() => {
+                        setEditing(tsk);
+                        setEditOpen(true);
+                      }}
+                      menu={[
+                        {
+                          label: t("common.delete"),
+                          icon: Trash2,
+                          destructive: true,
+                          disabled: removeTask.isPending,
+                          onSelect: () => handleDeleteTask(tsk.id),
+                        },
+                      ]}
+                    />
+                  }
+                />
+              ))}
+            </SortableList>
+          </AdminList>
           <AdminPagination
             className="mt-4"
             total={total}

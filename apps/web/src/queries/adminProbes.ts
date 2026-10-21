@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { keepPreviousData, useQuery } from "@tanstack/react-query";
 
 import { getAdminProbeTaskOptions, getAdminProbeTasks } from "@/api/adminProbes";
 
@@ -9,6 +9,8 @@ export function useAdminProbeTasks(
     queryKey: ["admin", "probeTasks", query],
     queryFn: () => getAdminProbeTasks(query),
     staleTime: 10_000,
+    // Keep the current rows on screen while a new filter or page loads.
+    placeholderData: keepPreviousData,
   });
 }
 

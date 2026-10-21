@@ -1,4 +1,5 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { Plus, Send, Trash2 } from "lucide-react";
 import * as React from "react";
 import { useTranslation } from "react-i18next";
 
@@ -17,7 +18,7 @@ import { QueryErrorCard } from "@/components/QueryErrorCard";
 import { useSiteConfig } from "@/components/SiteConfigProvider";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import {
   Dialog,
   DialogContent,
@@ -26,19 +27,17 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { Skeleton } from "@/components/ui/skeleton";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import { formatIsoShort } from "@/lib/time";
 import { getUserErrorMessage } from "@/lib/userErrors";
 import { useAdminAlertChannels } from "@/queries/adminAlerts";
+import { EnabledBadge } from "./components/AdminBadges";
+import { AdminList, AdminListRow } from "./components/AdminList";
 import { AlertChannelForm } from "./components/AlertChannelForm";
 import { ChannelConfigSummary } from "./components/ChannelConfigSummary";
+import { RowActions } from "./components/RowActions";
+
+// Tracks: channel, type, updated, status, actions.
+const CHANNEL_GRID = "@2xl/list:grid-cols-[minmax(0,1fr)_7rem_7.5rem_4.5rem_4.25rem]";
 
 export function AlertChannelsPanel() {
   const { t } = useTranslation();
@@ -90,6 +89,22 @@ export function AlertChannelsPanel() {
     });
   };
 
+  const handleTestChannel = async (channelId: string) => {
+    try {
+      await testChannel.mutateAsync(channelId);
+      toast.success(t("settings.channels.testSent"));
+    } catch (err) {
+      toast.error(
+        getUserErrorMessage(err, t, {
+          action: "test",
+          fallback: t("settings.channels.testFailed"),
+        }),
+      );
+    }
+  };
+
+  const channelList = channels.data?.channels ?? [];
+
   return (
     <>
       {channels.isError ? (
@@ -102,22 +117,20 @@ export function AlertChannelsPanel() {
 
       <Card>
         <CardHeader>
-          <div className="flex items-center justify-between gap-4">
-            <div className="space-y-1.5">
-              <CardTitle>{t("settings.channels.table.title")}</CardTitle>
-              <CardDescription>
-                {channels.isLoading ? (
-                  <Skeleton className="inline-block h-4 w-16 align-middle" />
-                ) : (
-                  t("settings.channels.table.count", {
-                    count: channels.data?.total ?? 0,
-                  })
-                )}
-              </CardDescription>
+          <div className="flex items-center justify-between gap-3">
+            <div className="text-muted-foreground">
+              {channels.isLoading ? (
+                <Skeleton className="h-4 w-16" />
+              ) : (
+                t("settings.channels.table.count", { count: channels.data?.total ?? 0 })
+              )}
             </div>
             <Dialog open={createChannelOpen} onOpenChange={setCreateChannelOpen}>
               <DialogTrigger asChild>
-                <Button>{t("settings.channels.createChannel")}</Button>
+                <Button>
+                  <Plus data-icon="inline-start" />
+                  {t("settings.channels.createChannel")}
+                </Button>
               </DialogTrigger>
               <DialogContent className="max-w-2xl" scrollBehavior="viewport">
                 <DialogHeader>
@@ -138,80 +151,62 @@ export function AlertChannelsPanel() {
           </div>
         </CardHeader>
         <CardContent>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>{t("settings.channels.table.name")}</TableHead>
-                <TableHead>{t("settings.channels.table.type")}</TableHead>
-                <TableHead>{t("settings.channels.table.status")}</TableHead>
-                <TableHead>{t("settings.channels.table.config")}</TableHead>
-                <TableHead>{t("settings.channels.table.updated")}</TableHead>
-                <TableHead>{t("settings.channels.table.actions")}</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {(channels.data?.channels ?? []).map((c) => (
-                <TableRow key={c.id}>
-                  <TableCell className="font-medium">{c.name}</TableCell>
-                  <TableCell>
-                    <Badge variant="outline">{c.type}</Badge>
-                  </TableCell>
-                  <TableCell>
-                    {c.enabled ? (
-                      <Badge className="bg-green-500/10 text-green-600 dark:text-green-400">
-                        {t("common.enabled")}
-                      </Badge>
-                    ) : (
-                      <Badge variant="destructive">{t("common.disabled")}</Badge>
-                    )}
-                  </TableCell>
-                  <TableCell className="text-muted-foreground text-sm">
-                    <ChannelConfigSummary type={c.type} config={c.config} />
-                  </TableCell>
-                  <TableCell className="text-xs">
-                    {formatIsoShort(c.updatedAtMs, timezone)}
-                  </TableCell>
-                  <TableCell>
-                    <div className="flex flex-wrap gap-2">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={async () => {
-                          try {
-                            await testChannel.mutateAsync(c.id);
-                            toast.success(t("settings.channels.testSent"));
-                          } catch (err) {
-                            toast.error(
-                              getUserErrorMessage(err, t, {
-                                action: "test",
-                                fallback: t("settings.channels.testFailed"),
-                              }),
-                            );
-                          }
-                        }}
-                        disabled={
-                          !c.enabled || (testChannel.isPending && testChannel.variables === c.id)
-                        }
-                      >
-                        {t("common.test")}
-                      </Button>
-                      <Button variant="outline" size="sm" onClick={() => setEditChannel(c)}>
-                        {t("common.edit")}
-                      </Button>
-                      <Button
-                        variant="destructive"
-                        size="sm"
-                        onClick={() => handleDeleteChannel(c.id)}
-                        disabled={removeChannel.isPending}
-                      >
-                        {t("common.delete")}
-                      </Button>
+          <AdminList
+            grid={CHANNEL_GRID}
+            columns={[
+              t("settings.channels.table.name"),
+              t("settings.channels.table.type"),
+              t("settings.channels.table.updated"),
+              t("settings.channels.table.status"),
+              "",
+            ]}
+            count={channelList.length}
+            loading={channels.isLoading}
+            empty={channels.isError ? null : t("common.noData")}
+          >
+            {channelList.map((c) => (
+              <AdminListRow
+                key={c.id}
+                grid={CHANNEL_GRID}
+                primary={
+                  <>
+                    <div className="truncate text-sm font-medium" title={c.name}>
+                      {c.name}
                     </div>
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+                    <div className="text-muted-foreground mt-0.5 truncate leading-4">
+                      <ChannelConfigSummary type={c.type} config={c.config} />
+                    </div>
+                  </>
+                }
+                cells={[
+                  <Badge variant="outline">{c.type}</Badge>,
+                  <span className="tabular-nums">{formatIsoShort(c.updatedAtMs, timezone)}</span>,
+                ]}
+                aside={<EnabledBadge enabled={c.enabled} />}
+                actions={
+                  <RowActions
+                    onEdit={() => setEditChannel(c)}
+                    menu={[
+                      {
+                        label: t("common.test"),
+                        icon: Send,
+                        disabled:
+                          !c.enabled || (testChannel.isPending && testChannel.variables === c.id),
+                        onSelect: () => void handleTestChannel(c.id),
+                      },
+                      {
+                        label: t("common.delete"),
+                        icon: Trash2,
+                        destructive: true,
+                        disabled: removeChannel.isPending,
+                        onSelect: () => handleDeleteChannel(c.id),
+                      },
+                    ]}
+                  />
+                }
+              />
+            ))}
+          </AdminList>
           <AdminPagination
             className="mt-4"
             total={channels.data?.total ?? 0}
