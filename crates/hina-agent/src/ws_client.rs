@@ -1,13 +1,18 @@
+use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::time::Duration;
 
 use anyhow::Context;
+use futures_util::stream::SplitSink;
 use futures_util::{SinkExt, StreamExt};
 use serde_json::Value;
+use tokio::net::TcpStream;
 use tokio::sync::mpsc;
 use tokio::time::{Instant, timeout};
+use tokio_tungstenite::tungstenite::Error as WsError;
 use tokio_tungstenite::tungstenite::protocol::Message;
-use url::Url;
+use tokio_tungstenite::{Connector, MaybeTlsStream, WebSocketStream};
+use url::{Host, Url};
 
 use crate::collector::TelemetryCollector;
 use crate::config::{AgentConfig, parse_mount_points};
@@ -16,6 +21,30 @@ use crate::protocol::{
     ErrorBody, HelloBody, IpUpdateBody, MessageType, ProbeConfigBody, TelemetryBody, WelcomeBody,
     WelcomeCfg, decode_envelope, encode_envelope,
 };
+
+type WsStream = WebSocketStream<MaybeTlsStream<TcpStream>>;
+type WsSink = SplitSink<WsStream, Message>;
+
+const MIN_BACKOFF: Duration = Duration::from_secs(1);
+const MAX_BACKOFF: Duration = Duration::from_secs(30);
+// A session that stayed authenticated this long ended for a new reason (outage, server restart),
+// so the next attempt starts from MIN_BACKOFF. Shorter sessions keep backing off even when the
+// server closed them cleanly, so two agents sharing a token settle at MAX_BACKOFF instead of
+// replacing each other every second; that relies on MAX_BACKOFF staying below this value.
+const STABLE_SESSION: Duration = Duration::from_secs(60);
+const WRITE_TIMEOUT: Duration = Duration::from_secs(30);
+const CONNECT_TIMEOUTS: ConnectTimeouts = ConnectTimeouts {
+    dns: Duration::from_secs(10),
+    tcp: Duration::from_secs(5),
+    handshake: Duration::from_secs(10),
+};
+
+#[derive(Clone, Copy)]
+struct ConnectTimeouts {
+    dns: Duration,
+    tcp: Duration,
+    handshake: Duration,
+}
 
 pub async fn run_agent(
     config: AgentConfig,
@@ -30,58 +59,59 @@ pub async fn run_agent(
         None
     };
 
-    let mut backoff = Duration::from_secs(1);
+    let mut backoff = MIN_BACKOFF;
 
     loop {
         if let Ok(path) = update_rx.try_recv() {
             return Ok(Some(path));
         }
 
-        let result = run_session(&config, connector.clone(), update_rx).await;
+        let mut authed_at = None;
+        let result = run_session(&config, connector.clone(), update_rx, &mut authed_at).await;
         if config.once {
             return result;
         }
 
         match result {
             update @ Ok(Some(_)) => return update,
-            Ok(None) => {
-                backoff = Duration::from_secs(1);
-            }
+            Ok(None) => {}
             Err(err) => {
-                tracing::warn!(error = %err, "ws session ended with error");
-                backoff = (backoff * 2).min(Duration::from_secs(30));
+                tracing::warn!(error = %format_args!("{err:#}"), "ws session ended with error");
             }
         }
+        backoff = next_backoff(backoff, authed_at.map(|at| at.elapsed()));
 
         let jitter_ms = fastrand::u64(0..=250);
         tokio::time::sleep(backoff + Duration::from_millis(jitter_ms)).await;
     }
 }
 
+fn next_backoff(prev: Duration, authed_for: Option<Duration>) -> Duration {
+    if authed_for.is_some_and(|elapsed| elapsed >= STABLE_SESSION) {
+        MIN_BACKOFF
+    } else {
+        (prev * 2).min(MAX_BACKOFF)
+    }
+}
+
 async fn run_session(
     config: &AgentConfig,
-    connector: Option<tokio_tungstenite::Connector>,
+    connector: Option<Connector>,
     update_rx: &mut mpsc::Receiver<PathBuf>,
+    authed_at: &mut Option<Instant>,
 ) -> anyhow::Result<Option<PathBuf>> {
-    Url::parse(&config.server_url).context("invalid server_url")?;
+    let server_url = Url::parse(&config.server_url).context("invalid server_url")?;
     tracing::info!(server_url = %config.server_url, "connecting");
 
     let interface = config.interface.clone();
     let mut ip_task =
         tokio::spawn(async move { crate::ip_resolve::resolve_ips(interface.as_deref()).await });
 
-    let (ws_stream, _) = match tokio_tungstenite::connect_async_tls_with_config(
-        config.server_url.as_str(),
-        None,
-        false,
-        connector,
-    )
-    .await
-    {
-        Ok(v) => v,
+    let ws_stream = match connect_ws(&server_url, connector, CONNECT_TIMEOUTS).await {
+        Ok(ws_stream) => ws_stream,
         Err(err) => {
             ip_task.abort();
-            return Err(err).context("connect_async failed");
+            return Err(err.context("connect failed"));
         }
     };
     let (mut ws_write, mut ws_read) = ws_stream.split();
@@ -118,12 +148,12 @@ async fn run_session(
     };
 
     let hello_bytes = encode_envelope(MessageType::Hello, &hello)?;
-    ws_write
-        .send(Message::Binary(hello_bytes.into()))
+    send_with_timeout(&mut ws_write, Message::Binary(hello_bytes.into()))
         .await
         .context("send HELLO failed")?;
 
-    let welcome = recv_welcome(&mut ws_read, &mut ws_write, Duration::from_secs(5)).await?;
+    let welcome = recv_welcome(&mut ws_read, Duration::from_secs(5)).await?;
+    *authed_at = Some(Instant::now());
     tracing::info!(
         agent_id = %welcome.agent_id,
         t_ms = welcome.cfg.telemetry_interval_ms,
@@ -134,7 +164,7 @@ async fn run_session(
     let jitter_ms = welcome.cfg.telemetry_jitter_ms.min(60_000);
 
     let (out_tx, mut out_rx) = mpsc::channel::<Message>(256);
-    let mut probe_runner = ProbeRunner::new(out_tx.clone());
+    let mut probe_runner = ProbeRunner::new(out_tx);
 
     let mut seq: u64 = 0;
     let mut current_interval_ms = interval_ms;
@@ -183,7 +213,9 @@ async fn run_session(
                 };
 
                 let bytes = encode_envelope(MessageType::Telemetry, &body)?;
-                ws_write.send(Message::Binary(bytes.into())).await.context("send TELEMETRY failed")?;
+                send_with_timeout(&mut ws_write, Message::Binary(bytes.into()))
+                    .await
+                    .context("send TELEMETRY failed")?;
 
                 seq = seq.wrapping_add(1);
 
@@ -193,7 +225,7 @@ async fn run_session(
                 }
 
                 if config.once {
-                    ws_write.send(Message::Close(None)).await.ok();
+                    send_with_timeout(&mut ws_write, Message::Close(None)).await.ok();
                     return Ok(None);
                 }
 
@@ -202,7 +234,9 @@ async fn run_session(
             }
 
             _ = &mut ping_timer => {
-                ws_write.send(Message::Ping(vec![].into())).await.context("send PING failed")?;
+                send_with_timeout(&mut ws_write, Message::Ping(vec![].into()))
+                    .await
+                    .context("send PING failed")?;
                 ping_timer.as_mut().reset(Instant::now() + PING_INTERVAL);
             }
 
@@ -241,7 +275,9 @@ async fn run_session(
                     };
                     last_sent_ips = resolved;
                     let bytes = encode_envelope(MessageType::IpUpdate, &body)?;
-                    ws_write.send(Message::Binary(bytes.into())).await.context("send IP_UPDATE failed")?;
+                    send_with_timeout(&mut ws_write, Message::Binary(bytes.into()))
+                        .await
+                        .context("send IP_UPDATE failed")?;
                 } else {
                     tracing::debug!("IPs unchanged, skipping update");
                 }
@@ -251,7 +287,7 @@ async fn run_session(
                 let Some(msg) = outbound else {
                     return Ok(None);
                 };
-                ws_write.send(msg).await.context("ws write failed")?;
+                send_with_timeout(&mut ws_write, msg).await.context("ws write failed")?;
             }
 
             msg = ws_read.next() => {
@@ -261,7 +297,7 @@ async fn run_session(
                 };
                 let message = result.context("ws read error")?;
                 read_deadline.as_mut().reset(Instant::now() + READ_TIMEOUT);
-                let next_runtime = handle_incoming(&out_tx, &mut probe_runner, message).await?;
+                let next_runtime = handle_incoming(&mut probe_runner, message)?;
                 if !next_runtime.keep_running {
                     probe_runner.shutdown();
                     return Ok(None);
@@ -283,7 +319,7 @@ async fn run_session(
                 match path {
                     Some(path) => {
                         tracing::info!("update ready, shutting down gracefully");
-                        ws_write.send(Message::Close(None)).await.ok();
+                        send_with_timeout(&mut ws_write, Message::Close(None)).await.ok();
                         probe_runner.shutdown();
                         return Ok(Some(path));
                     }
@@ -296,11 +332,117 @@ async fn run_session(
     }
 }
 
+async fn connect_ws(
+    server_url: &Url,
+    connector: Option<Connector>,
+    timeouts: ConnectTimeouts,
+) -> anyhow::Result<WsStream> {
+    let addrs = resolve_server_addrs(server_url, timeouts.dns).await?;
+    connect_any(server_url, &addrs, connector, timeouts).await
+}
+
+async fn resolve_server_addrs(
+    server_url: &Url,
+    dns_timeout: Duration,
+) -> anyhow::Result<Vec<SocketAddr>> {
+    let port = server_url
+        .port_or_known_default()
+        .context("server_url has no port")?;
+    let addrs = match server_url.host().context("server_url has no host")? {
+        Host::Ipv4(ip) => vec![SocketAddr::from((ip, port))],
+        Host::Ipv6(ip) => vec![SocketAddr::from((ip, port))],
+        Host::Domain(domain) => {
+            match timeout(dns_timeout, tokio::net::lookup_host((domain, port))).await {
+                Ok(result) => result
+                    .with_context(|| format!("DNS lookup for {domain} failed"))?
+                    .collect(),
+                Err(_) => anyhow::bail!("DNS lookup for {domain} timed out after {dns_timeout:?}"),
+            }
+        }
+    };
+    Ok(interleave_families(addrs))
+}
+
+// Alternates address families (keeping the resolver's order within each family) so that a
+// broken path for one family costs a single connect timeout before the other one is tried.
+fn interleave_families(addrs: Vec<SocketAddr>) -> Vec<SocketAddr> {
+    let first_is_v6 = addrs.first().is_some_and(SocketAddr::is_ipv6);
+    let (primary, secondary): (Vec<_>, Vec<_>) = addrs
+        .into_iter()
+        .partition(|addr| addr.is_ipv6() == first_is_v6);
+    let mut interleaved = Vec::with_capacity(primary.len() + secondary.len());
+    let mut secondary = secondary.into_iter();
+    for addr in primary {
+        interleaved.push(addr);
+        interleaved.extend(secondary.next());
+    }
+    interleaved.extend(secondary);
+    interleaved
+}
+
+// Every step has its own deadline: otherwise a black-holed SYN, an unacknowledged handshake or a
+// half-open connection leaves the reconnect loop waiting on kernel timeouts, possibly forever.
+async fn connect_any(
+    server_url: &Url,
+    addrs: &[SocketAddr],
+    connector: Option<Connector>,
+    timeouts: ConnectTimeouts,
+) -> anyhow::Result<WsStream> {
+    let mut last_err = None;
+    for &addr in addrs {
+        match connect_addr(server_url, addr, connector.clone(), timeouts).await {
+            Ok(ws_stream) => {
+                tracing::info!(%addr, "connected");
+                return Ok(ws_stream);
+            }
+            // The server answered and refused the upgrade (e.g. 429); all addresses lead to it.
+            Err(err) if is_upgrade_rejection(&err) => return Err(err),
+            Err(err) => {
+                tracing::warn!(%addr, error = %format_args!("{err:#}"), "connect attempt failed");
+                last_err = Some(err);
+            }
+        }
+    }
+    Err(last_err.unwrap_or_else(|| anyhow::anyhow!("server_url resolved to no address")))
+}
+
+async fn connect_addr(
+    server_url: &Url,
+    addr: SocketAddr,
+    connector: Option<Connector>,
+    timeouts: ConnectTimeouts,
+) -> anyhow::Result<WsStream> {
+    let tcp = match timeout(timeouts.tcp, TcpStream::connect(addr)).await {
+        Ok(result) => result.with_context(|| format!("TCP connect to {addr} failed"))?,
+        Err(_) => anyhow::bail!("TCP connect to {addr} timed out after {:?}", timeouts.tcp),
+    };
+    let handshake =
+        tokio_tungstenite::client_async_tls_with_config(server_url.as_str(), tcp, None, connector);
+    match timeout(timeouts.handshake, handshake).await {
+        Ok(result) => {
+            let (ws_stream, _) = result.with_context(|| format!("handshake with {addr} failed"))?;
+            Ok(ws_stream)
+        }
+        Err(_) => anyhow::bail!(
+            "handshake with {addr} timed out after {:?}",
+            timeouts.handshake
+        ),
+    }
+}
+
+fn is_upgrade_rejection(err: &anyhow::Error) -> bool {
+    matches!(err.downcast_ref::<WsError>(), Some(WsError::Http(_)))
+}
+
+async fn send_with_timeout(ws_write: &mut WsSink, msg: Message) -> anyhow::Result<()> {
+    match timeout(WRITE_TIMEOUT, ws_write.send(msg)).await {
+        Ok(result) => Ok(result?),
+        Err(_) => anyhow::bail!("write timed out after {WRITE_TIMEOUT:?}"),
+    }
+}
+
 async fn recv_welcome(
-    ws_read: &mut (
-             impl StreamExt<Item = Result<Message, tokio_tungstenite::tungstenite::Error>> + Unpin
-         ),
-    ws_write: &mut (impl SinkExt<Message, Error = tokio_tungstenite::tungstenite::Error> + Unpin),
+    ws_read: &mut (impl StreamExt<Item = Result<Message, WsError>> + Unpin),
     wait: Duration,
 ) -> anyhow::Result<WelcomeBody> {
     let fut = async {
@@ -324,10 +466,12 @@ async fn recv_welcome(
                         _ => {}
                     }
                 }
-                Message::Ping(data) => {
-                    ws_write.send(Message::Pong(data)).await?;
-                }
-                Message::Close(_) => anyhow::bail!("ws closed before WELCOME"),
+                Message::Close(Some(frame)) => anyhow::bail!(
+                    "ws closed before WELCOME: code={} reason={:?}",
+                    u16::from(frame.code),
+                    frame.reason.as_str()
+                ),
+                Message::Close(None) => anyhow::bail!("ws closed before WELCOME"),
                 _ => {}
             }
         }
@@ -341,11 +485,7 @@ struct IncomingAction {
     runtime_cfg: Option<WelcomeCfg>,
 }
 
-async fn handle_incoming(
-    out_tx: &mpsc::Sender<Message>,
-    probe_runner: &mut ProbeRunner,
-    msg: Message,
-) -> anyhow::Result<IncomingAction> {
+fn handle_incoming(probe_runner: &mut ProbeRunner, msg: Message) -> anyhow::Result<IncomingAction> {
     match msg {
         Message::Binary(bytes) => {
             let env = decode_envelope(&bytes)?;
@@ -400,15 +540,22 @@ async fn handle_incoming(
                 tracing::warn!(code = %body.code, message = %body.message, "server error");
             }
         }
-        Message::Ping(data) => {
-            let _ = out_tx.send(Message::Pong(data)).await;
-        }
-        Message::Close(_) => {
+        Message::Close(frame) => {
+            match frame {
+                Some(frame) => tracing::info!(
+                    code = u16::from(frame.code),
+                    reason = frame.reason.as_str(),
+                    "server closed the session"
+                ),
+                None => tracing::info!("server closed the session"),
+            }
             return Ok(IncomingAction {
                 keep_running: false,
                 runtime_cfg: None,
             });
         }
+        // tungstenite queues Pong replies itself; replying through the out queue here would block
+        // the session loop forever once that queue is full.
         _ => {}
     }
     Ok(IncomingAction {
@@ -481,5 +628,139 @@ fn build_os_string() -> Option<String> {
         (Some(name), None) => Some(name),
         (None, Some(ver)) => Some(ver),
         (None, None) => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::net::{Ipv4Addr, Ipv6Addr};
+
+    use tokio::net::TcpListener;
+    use tokio_tungstenite::tungstenite::protocol::CloseFrame;
+
+    use super::*;
+
+    const FAST: ConnectTimeouts = ConnectTimeouts {
+        dns: Duration::from_secs(1),
+        tcp: Duration::from_secs(1),
+        handshake: Duration::from_millis(300),
+    };
+
+    fn v4(last: u8) -> SocketAddr {
+        SocketAddr::from((Ipv4Addr::new(192, 0, 2, last), 443))
+    }
+
+    fn v6(last: u16) -> SocketAddr {
+        SocketAddr::from((Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, last), 443))
+    }
+
+    fn ws_url(addr: SocketAddr) -> Url {
+        Url::parse(&format!("ws://{addr}/ws")).unwrap()
+    }
+
+    async fn spawn_ws_server() -> SocketAddr {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            while let Ok((stream, _)) = listener.accept().await {
+                tokio::spawn(async move {
+                    if let Ok(mut ws) = tokio_tungstenite::accept_async(stream).await {
+                        while ws.next().await.is_some() {}
+                    }
+                });
+            }
+        });
+        addr
+    }
+
+    #[test]
+    fn interleave_families_alternates_starting_with_first_family() {
+        assert_eq!(
+            interleave_families(vec![v6(1), v6(2), v4(1), v4(2)]),
+            vec![v6(1), v4(1), v6(2), v4(2)]
+        );
+        assert_eq!(
+            interleave_families(vec![v4(1), v4(2), v4(3), v6(1)]),
+            vec![v4(1), v6(1), v4(2), v4(3)]
+        );
+        assert_eq!(interleave_families(vec![v4(1), v4(2)]), vec![v4(1), v4(2)]);
+        assert!(interleave_families(Vec::new()).is_empty());
+    }
+
+    #[test]
+    fn backoff_resets_only_after_stable_session() {
+        assert_eq!(next_backoff(MIN_BACKOFF, None), Duration::from_secs(2));
+        assert_eq!(next_backoff(Duration::from_secs(16), None), MAX_BACKOFF);
+        assert_eq!(
+            next_backoff(MAX_BACKOFF, Some(Duration::from_secs(10))),
+            MAX_BACKOFF
+        );
+        assert_eq!(next_backoff(MAX_BACKOFF, Some(STABLE_SESSION)), MIN_BACKOFF);
+    }
+
+    #[tokio::test]
+    async fn recv_welcome_reports_close_code() {
+        let close = Message::Close(Some(CloseFrame {
+            code: 4001u16.into(),
+            reason: "hello_timeout".into(),
+        }));
+        let mut ws_read = futures_util::stream::iter([Ok::<_, WsError>(close)]);
+
+        let Err(err) = recv_welcome(&mut ws_read, Duration::from_secs(1)).await else {
+            panic!("recv_welcome should fail on close");
+        };
+
+        assert!(err.to_string().contains("code=4001"), "{err:#}");
+    }
+
+    #[tokio::test]
+    async fn connect_times_out_when_handshake_gets_no_response() {
+        // Never accepted: the kernel completes the TCP handshake, but the upgrade gets no reply.
+        let silent = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = silent.local_addr().unwrap();
+
+        let Err(err) = connect_any(&ws_url(addr), &[addr], None, FAST).await else {
+            panic!("connect should fail");
+        };
+
+        assert!(format!("{err:#}").contains("timed out"), "{err:#}");
+    }
+
+    #[tokio::test]
+    async fn connect_falls_back_to_next_address() {
+        let silent = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let refused = TcpListener::bind("127.0.0.1:0")
+            .await
+            .unwrap()
+            .local_addr()
+            .unwrap();
+        let good = spawn_ws_server().await;
+        let addrs = [silent.local_addr().unwrap(), refused, good];
+
+        if let Err(err) = connect_any(&ws_url(good), &addrs, None, FAST).await {
+            panic!("connect should fall back to {good}: {err:#}");
+        }
+    }
+
+    #[tokio::test]
+    async fn connect_stops_when_server_rejects_upgrade() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let rejecting = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            stream.writable().await.unwrap();
+            stream
+                .try_write(b"HTTP/1.1 429 Too Many Requests\r\ncontent-length: 0\r\n\r\n")
+                .unwrap();
+            // Keep the socket open so the client reads the response rather than a reset.
+            std::future::pending::<()>().await;
+        });
+        let good = spawn_ws_server().await;
+
+        let Err(err) = connect_any(&ws_url(good), &[rejecting, good], None, FAST).await else {
+            panic!("connect should not fall back after the server rejected the upgrade");
+        };
+
+        assert!(is_upgrade_rejection(&err), "{err:#}");
     }
 }
