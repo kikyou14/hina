@@ -184,7 +184,7 @@ fn operation_not_permitted_is_classified_for_traceroute() {
 
 #[test]
 fn traceroute_extra_v1_pads_ttl_gaps_and_formats_hops() {
-    let target_ip = Ipv4Addr::new(1, 1, 1, 1);
+    let target_ip = IpAddr::V4(Ipv4Addr::new(1, 1, 1, 1));
     // One HopResult per TTL (QUERIES_PER_HOP = 1). TTL 2 is missing → padded as timeout.
     let hops = vec![
         HopResult {
@@ -219,7 +219,7 @@ fn traceroute_extra_v1_pads_ttl_gaps_and_formats_hops() {
         "gateway.local".to_string(),
     );
 
-    let extra = traceroute_extra_v1(&result, Some(Ipv4Addr::new(10, 0, 0, 2)), &rdns);
+    let extra = traceroute_extra_v1(&result, Some(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2))), &rdns);
 
     // ASN info is always null (enriched server-side)
     assert!(

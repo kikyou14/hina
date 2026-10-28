@@ -14,6 +14,7 @@ import { sha256Hex } from "../util/hash";
 import { resolveAgentIpFamilies, selectAgentGeoIp } from "../util/ip";
 import { safeJsonStringify } from "../util/lang";
 import {
+  capabilitySupportsTracerouteIcmpIpv6,
   capabilitySupportsTracerouteTcpSizePair,
   capabilitySupportsTcpPacketSize,
 } from "../util/probe-capabilities";
@@ -112,6 +113,7 @@ async function handleHelloInner(
   const inventoryPack = hello.inv !== undefined ? Buffer.from(encode(hello.inv)) : undefined;
   const capabilitiesJson = safeJsonStringify(hello.cap) ?? null;
   ws.data.supportsTracerouteTcpSizePair = capabilitySupportsTracerouteTcpSizePair(hello.cap);
+  ws.data.supportsTracerouteIcmpIpv6 = capabilitySupportsTracerouteIcmpIpv6(hello.cap);
   ws.data.supportsTcpPacketSize = capabilitySupportsTcpPacketSize(hello.cap);
   const resolvedIps = resolveAgentIpFamilies({
     reportedIpv4: hello.ip4 ?? null,

@@ -148,7 +148,6 @@ export function parseTarget(
   if (kind === "traceroute") {
     const host = typeof value["host"] === "string" ? value["host"].trim() : "";
     if (!host || !isValidHost(host)) return null;
-    if (isIpv6(host)) return null;
 
     const protocol = value["protocol"];
     if (protocol === undefined || protocol === "icmp") {
@@ -156,6 +155,8 @@ export function parseTarget(
       return { target, targetJson: JSON.stringify(target) };
     }
     if (protocol !== "tcp") return null;
+    // The dual-size TCP mode crafts raw IPv4 packets.
+    if (isIpv6(host)) return null;
 
     const port = typeof value["port"] === "number" ? value["port"] : Number.NaN;
     if (!Number.isFinite(port) || !Number.isInteger(port) || port < 1 || port > 65535) return null;

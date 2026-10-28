@@ -61,6 +61,7 @@ export type AgentWsData = {
   probeTaskIds?: Set<string>;
   tracerouteTaskIds?: Set<string>;
   supportsTracerouteTcpSizePair?: boolean;
+  supportsTracerouteIcmpIpv6?: boolean;
   supportsTcpPacketSize?: boolean;
   authed: boolean;
   rateLimit: RateLimitState;
@@ -223,6 +224,7 @@ export function createWsHub(deps: {
         scope,
         rev: nextProbeConfigRev(),
         supportsTracerouteTcpSizePair: ws.data.supportsTracerouteTcpSizePair,
+        supportsTracerouteIcmpIpv6: ws.data.supportsTracerouteIcmpIpv6,
         supportsTcpPacketSize: ws.data.supportsTcpPacketSize,
       });
       ws.data.probeTaskIds = new Set(body.tasks.map((t) => t.id));

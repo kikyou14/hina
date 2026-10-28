@@ -14,9 +14,13 @@ describe("parseTarget traceroute — ICMP (default/compat) mode", () => {
     expect(result!.target).toEqual({ host: "example.com" });
   });
 
-  test("rejects IPv6 host literals", () => {
-    expect(parseTarget("traceroute", { host: "2001:db8::1" })).toBeNull();
-    expect(parseTarget("traceroute", { host: "2001:db8::1", protocol: "icmp" })).toBeNull();
+  test("accepts IPv6 host literals", () => {
+    expect(parseTarget("traceroute", { host: "2001:db8::1" })!.target).toEqual({
+      host: "2001:db8::1",
+    });
+    expect(parseTarget("traceroute", { host: "2001:db8::1", protocol: "icmp" })!.target).toEqual({
+      host: "2001:db8::1",
+    });
   });
 
   test("rejects missing or invalid host", () => {

@@ -351,6 +351,12 @@
       "noneLabel": "No agent support",
       "noneTitle": "None of the {{total}} target agents support this TCP probe mode, so this task runs nowhere until a supporting agent connects."
     },
+    "tracerouteIpv6Unsupported": {
+      "someLabel": "{{unsupported}}/{{total}} unsupported",
+      "someTitle": "{{unsupported}} of {{total}} target agents don't support IPv6 traceroute and will skip this task until their agent is upgraded.",
+      "noneLabel": "No agent support",
+      "noneTitle": "None of the {{total}} target agents support IPv6 traceroute, so this task runs nowhere until an upgraded agent connects."
+    },
     "form": {
       "tcpPacketSize": "TCP probe mode",
       "tcpSystemConnect": "System connection (default)",
@@ -381,7 +387,7 @@
       "invalidUrl": "Invalid URL: must start with http:// or https://.",
       "invalidPacketSize": "Invalid packet size: must be an integer between 40 and 1500 bytes.",
       "duplicatePacketSizes": "The two packet sizes must be different.",
-      "tracerouteIpv6NotSupported": "Traceroute targets must be IPv4 (IPv6 is not supported).",
+      "tracerouteTcpIpv4Only": "TCP size comparison requires an IPv4 address or a hostname with an IPv4 record.",
       "requestFailed": "Request failed."
     },
     "deleteConfirm": "Delete this task?",

@@ -118,7 +118,7 @@ describe("handleHello defers registry update until DB commit succeeds", () => {
     sqlite.close();
   });
 
-  test("captures fixed TCP capability before pushing configuration and clears it on reconnect", async () => {
+  test("captures probe capabilities before pushing configuration and clears them on reconnect", async () => {
     await seedAgent(db, "a1", "tok-a1");
     await registry.load();
     for (const supported of [true, false]) {
@@ -126,12 +126,18 @@ describe("handleHello defers registry update until DB commit succeeds", () => {
       let pushed = false;
       await handleHello(
         ws,
-        { tok: "tok-a1", cap: supported ? { probes: { tcp: { packetSize: true } } } : {} },
+        {
+          tok: "tok-a1",
+          cap: supported
+            ? { probes: { tcp: { packetSize: true }, traceroute: { icmpIpv6: true } } }
+            : {},
+        },
         Date.now(),
         {
           ...deps,
           pushProbeConfig: async () => {
             expect(ws.data.supportsTcpPacketSize).toBe(supported);
+            expect(ws.data.supportsTracerouteIcmpIpv6).toBe(supported);
             pushed = true;
             return true;
           },

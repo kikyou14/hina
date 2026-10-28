@@ -8,7 +8,7 @@ export type ProbeTaskTarget =
   | { host: string; protocol: "tcp"; port: number; packetSizes: [number, number] }
   | { url: string };
 
-export type TcpProbeSupport = {
+export type ProbeSupport = {
   targetAgents: number;
   unsupportedAgents: number;
 };
@@ -27,8 +27,9 @@ export type AdminProbeTask = {
   updatedAtMs: number;
   groups: Array<{ id: string; name: string }>;
   agents: Array<{ id: string; name: string }>;
-  tcpSizePairSupport?: TcpProbeSupport | null;
-  tcpPacketSizeSupport?: TcpProbeSupport | null;
+  tcpSizePairSupport?: ProbeSupport | null;
+  tracerouteIpv6Support?: ProbeSupport | null;
+  tcpPacketSizeSupport?: ProbeSupport | null;
 };
 
 export type AdminProbeTaskRef = {

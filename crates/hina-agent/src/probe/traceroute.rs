@@ -16,7 +16,7 @@ use tokio::{
 };
 
 pub(crate) use super::raw_socket::{
-    async_recv_from, async_send_to, probe_origin_ip, strip_ip_header,
+    async_recv_from, async_send_to, probe_origin_addr, probe_origin_ip, strip_ip_header,
 };
 
 use super::{clamp_error, outcome::ProbeOutcome, remaining_until, task::TracerouteMode};
@@ -40,9 +40,18 @@ const ICMP_DEST_UNREACHABLE: u8 = 3;
 const ICMP_ECHO_REQUEST: u8 = 8;
 const ICMP_TIME_EXCEEDED: u8 = 11;
 
+// ICMPv6 message types
+const ICMPV6_DEST_UNREACHABLE: u8 = 1;
+const ICMPV6_TIME_EXCEEDED: u8 = 3;
+const ICMPV6_ECHO_REQUEST: u8 = 128;
+const ICMPV6_ECHO_REPLY: u8 = 129;
+
 // Minimum sizes for parsing received ICMP packets
 pub(crate) const ICMP_HEADER_LEN: usize = 8;
 pub(crate) const IP_HEADER_MIN_LEN: usize = 20;
+const IPV6_HEADER_LEN: usize = 40;
+const IPV6_NEXT_HEADER_OFFSET: usize = 6;
+const IPPROTO_ICMPV6: u8 = 58;
 
 #[derive(Debug, Clone)]
 pub(crate) struct HopResult {
@@ -54,7 +63,7 @@ pub(crate) struct HopResult {
 #[derive(Debug)]
 pub(crate) struct RawTracerouteResult {
     pub(crate) target: String,
-    pub(crate) target_ip: Ipv4Addr,
+    pub(crate) target_ip: IpAddr,
     pub(crate) hops: Vec<HopResult>,
     pub(crate) destination_reached: bool,
     pub(crate) total_duration: Duration,
@@ -104,7 +113,7 @@ async fn run_traceroute(
     target: &str,
     deadline: tokio::time::Instant,
 ) -> Result<TracerouteRunOutcome, TracerouteProbeError> {
-    let target_ip = resolve_traceroute_ipv4(target, deadline).await?;
+    let target_ip = resolve_traceroute_ip(target, deadline).await?;
 
     let overall_timeout = remaining_until(deadline);
     if overall_timeout.is_zero() {
@@ -122,7 +131,7 @@ async fn run_traceroute(
     )
     .await?;
 
-    let origin_ip = probe_origin_ip(target_ip).await;
+    let origin_ip = probe_origin_addr(target_ip).await;
 
     // Collect unique IPs for rDNS
     let mut uniq_ips = HashSet::<IpAddr>::new();
@@ -152,16 +161,18 @@ async fn run_traceroute(
     })
 }
 
-fn create_icmp_raw_socket() -> Result<Socket, TracerouteProbeError> {
-    let s = Socket::new(Domain::IPV4, Type::RAW, Some(Protocol::ICMPV4)).map_err(|e| {
-        TracerouteProbeError {
-            code: if is_permission_error(&e) {
-                "permission_denied"
-            } else {
-                "socket_error"
-            },
-            detail: format!("failed to create ICMP socket: {e}"),
-        }
+fn create_icmp_raw_socket(target_ip: IpAddr) -> Result<Socket, TracerouteProbeError> {
+    let (domain, protocol) = match target_ip {
+        IpAddr::V4(_) => (Domain::IPV4, Protocol::ICMPV4),
+        IpAddr::V6(_) => (Domain::IPV6, Protocol::ICMPV6),
+    };
+    let s = Socket::new(domain, Type::RAW, Some(protocol)).map_err(|e| TracerouteProbeError {
+        code: if is_permission_error(&e) {
+            "permission_denied"
+        } else {
+            "socket_error"
+        },
+        detail: format!("failed to create ICMP socket: {e}"),
     })?;
     s.set_nonblocking(true).map_err(|e| TracerouteProbeError {
         code: "socket_error",
@@ -180,11 +191,11 @@ pub(crate) fn is_permission_error(e: &io::Error) -> bool {
 
 async fn run_raw_traceroute(
     target: &str,
-    target_ip: Ipv4Addr,
+    target_ip: IpAddr,
     probe_timeout: Duration,
     overall_timeout: Duration,
 ) -> Result<RawTracerouteResult, TracerouteProbeError> {
-    let socket = create_icmp_raw_socket()?;
+    let socket = create_icmp_raw_socket(target_ip)?;
     let fd = AsyncFd::new(socket).map_err(|e| TracerouteProbeError {
         code: "socket_error",
         detail: format!("AsyncFd: {e}"),
@@ -212,7 +223,7 @@ async fn run_raw_traceroute(
                     addr: Some(addr),
                     rtt: Some(rtt),
                 });
-                if addr == IpAddr::V4(target_ip) {
+                if addr == target_ip {
                     destination_reached = true;
                     break;
                 }
@@ -230,10 +241,17 @@ async fn run_raw_traceroute(
                     addr: Some(addr),
                     rtt: Some(rtt),
                 });
-                if addr == IpAddr::V4(target_ip) {
+                if addr == target_ip {
                     destination_reached = true;
                 }
                 break;
+            }
+            // No route fails every hop the same way; report it instead of a trace of timeouts.
+            HopOutcome::Unreachable(e) => {
+                return Err(TracerouteProbeError {
+                    code: "network_unreachable",
+                    detail: format!("failed to send probe: {e}"),
+                });
             }
             HopOutcome::Timeout => {
                 hops.push(HopResult {
@@ -266,30 +284,44 @@ enum HopOutcome {
     Reply { addr: IpAddr, rtt: Duration },
     TimeExceeded { addr: IpAddr, rtt: Duration },
     DestUnreachable { addr: IpAddr, rtt: Duration },
+    Unreachable(io::Error),
     Timeout,
     Error(io::Error),
 }
 
 async fn probe_one_hop(
     fd: &AsyncFd<Socket>,
-    target_ip: Ipv4Addr,
+    target_ip: IpAddr,
     ttl: u8,
     ident: u16,
     seq: u16,
     timeout: Duration,
 ) -> HopOutcome {
-    // Set TTL
-    if let Err(e) = fd.get_ref().set_ttl_v4(ttl as u32) {
+    let v6 = target_ip.is_ipv6();
+
+    // Set TTL (hop limit for IPv6)
+    let set_ttl = if v6 {
+        fd.get_ref().set_unicast_hops_v6(ttl as u32)
+    } else {
+        fd.get_ref().set_ttl_v4(ttl as u32)
+    };
+    if let Err(e) = set_ttl {
         return HopOutcome::Error(e);
     }
 
     // Build & send ICMP Echo Request
-    let packet = build_echo_request(ident, seq);
-    let dest = socket2::SockAddr::from(SocketAddr::new(IpAddr::V4(target_ip), 0));
+    let packet = build_echo_request(v6, ident, seq);
+    let dest = socket2::SockAddr::from(SocketAddr::new(target_ip, 0));
 
     let send_time = std::time::Instant::now();
 
     if let Err(e) = async_send_to(fd, &packet, &dest).await {
+        if matches!(
+            e.kind(),
+            io::ErrorKind::NetworkUnreachable | io::ErrorKind::HostUnreachable
+        ) {
+            return HopOutcome::Unreachable(e);
+        }
         return HopOutcome::Error(e);
     }
 
@@ -319,75 +351,105 @@ async fn probe_one_hop(
         };
 
         let rtt = send_time.elapsed();
-        let icmp_data = strip_ip_header(&buf[..n]);
+        // IPv4 raw sockets deliver the IP header; IPv6 raw sockets never do.
+        let icmp_data = if v6 {
+            &buf[..n]
+        } else {
+            strip_ip_header(&buf[..n])
+        };
 
-        if icmp_data.len() < ICMP_HEADER_LEN {
-            continue;
-        }
-
-        let icmp_type = icmp_data[0];
-
-        match icmp_type {
-            ICMP_ECHO_REPLY => {
-                let recv_ident = u16::from_be_bytes([icmp_data[4], icmp_data[5]]);
-                let recv_seq = u16::from_be_bytes([icmp_data[6], icmp_data[7]]);
-                if recv_ident == ident && recv_seq == seq {
-                    return HopOutcome::Reply {
-                        addr: from_addr,
-                        rtt,
-                    };
-                }
+        match classify_reply(icmp_data, v6, ident, seq) {
+            Some(ReplyKind::EchoReply) => {
+                return HopOutcome::Reply {
+                    addr: from_addr,
+                    rtt,
+                };
             }
-            ICMP_TIME_EXCEEDED => {
-                if let Some(true) = match_embedded_probe(icmp_data, ident, seq) {
-                    return HopOutcome::TimeExceeded {
-                        addr: from_addr,
-                        rtt,
-                    };
-                }
+            Some(ReplyKind::TimeExceeded) => {
+                return HopOutcome::TimeExceeded {
+                    addr: from_addr,
+                    rtt,
+                };
             }
-            ICMP_DEST_UNREACHABLE => {
-                if let Some(true) = match_embedded_probe(icmp_data, ident, seq) {
-                    return HopOutcome::DestUnreachable {
-                        addr: from_addr,
-                        rtt,
-                    };
-                }
+            Some(ReplyKind::DestUnreachable) => {
+                return HopOutcome::DestUnreachable {
+                    addr: from_addr,
+                    rtt,
+                };
             }
-            _ => {}
+            None => {}
         }
     }
 }
 
-fn match_embedded_probe(icmp_data: &[u8], ident: u16, seq: u16) -> Option<bool> {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ReplyKind {
+    EchoReply,
+    TimeExceeded,
+    DestUnreachable,
+}
+
+/// Classifies an ICMP or ICMPv6 message, starting at its header, that answers our probe.
+fn classify_reply(icmp_data: &[u8], v6: bool, ident: u16, seq: u16) -> Option<ReplyKind> {
+    if icmp_data.len() < ICMP_HEADER_LEN {
+        return None;
+    }
+    let kind = match (v6, icmp_data[0]) {
+        (false, ICMP_ECHO_REPLY) | (true, ICMPV6_ECHO_REPLY) => {
+            return echo_matches(icmp_data, ident, seq).then_some(ReplyKind::EchoReply);
+        }
+        (false, ICMP_TIME_EXCEEDED) | (true, ICMPV6_TIME_EXCEEDED) => ReplyKind::TimeExceeded,
+        (false, ICMP_DEST_UNREACHABLE) | (true, ICMPV6_DEST_UNREACHABLE) => {
+            ReplyKind::DestUnreachable
+        }
+        _ => return None,
+    };
+    match_embedded_probe(icmp_data, v6, ident, seq).then_some(kind)
+}
+
+fn echo_matches(echo: &[u8], ident: u16, seq: u16) -> bool {
+    echo[4..6] == ident.to_be_bytes() && echo[6..8] == seq.to_be_bytes()
+}
+
+fn match_embedded_probe(icmp_data: &[u8], v6: bool, ident: u16, seq: u16) -> bool {
     // After the 8-byte ICMP header comes the original IP header + ICMP fragment.
-    let inner = icmp_data.get(ICMP_HEADER_LEN..)?;
-    if inner.len() < IP_HEADER_MIN_LEN + ICMP_HEADER_LEN {
-        return None;
-    }
-    let ihl = (inner[0] & 0x0F) as usize * 4;
-    if inner.len() < ihl + ICMP_HEADER_LEN {
-        return None;
-    }
-    let inner_icmp = &inner[ihl..];
-    if inner_icmp[0] != ICMP_ECHO_REQUEST {
-        return None;
-    }
-    let orig_ident = u16::from_be_bytes([inner_icmp[4], inner_icmp[5]]);
-    let orig_seq = u16::from_be_bytes([inner_icmp[6], inner_icmp[7]]);
-    Some(orig_ident == ident && orig_seq == seq)
+    let Some(inner) = icmp_data.get(ICMP_HEADER_LEN..) else {
+        return false;
+    };
+    let (header_len, echo_request) = if v6 {
+        // Our probes carry no extension headers, so the echo follows the fixed header.
+        if inner.get(IPV6_NEXT_HEADER_OFFSET) != Some(&IPPROTO_ICMPV6) {
+            return false;
+        }
+        (IPV6_HEADER_LEN, ICMPV6_ECHO_REQUEST)
+    } else {
+        let ihl = inner.first().map_or(0, |b| (b & 0x0F) as usize * 4);
+        if ihl < IP_HEADER_MIN_LEN {
+            return false;
+        }
+        (ihl, ICMP_ECHO_REQUEST)
+    };
+    inner
+        .get(header_len..header_len + ICMP_HEADER_LEN)
+        .is_some_and(|echo| echo[0] == echo_request && echo_matches(echo, ident, seq))
 }
 
-fn build_echo_request(ident: u16, seq: u16) -> [u8; 8] {
+fn build_echo_request(v6: bool, ident: u16, seq: u16) -> [u8; 8] {
     let mut pkt = [0u8; 8];
-    pkt[0] = ICMP_ECHO_REQUEST;
+    pkt[0] = if v6 {
+        ICMPV6_ECHO_REQUEST
+    } else {
+        ICMP_ECHO_REQUEST
+    };
     pkt[1] = 0; // code
-    // checksum at [2..4], filled below
     pkt[4..6].copy_from_slice(&ident.to_be_bytes());
     pkt[6..8].copy_from_slice(&seq.to_be_bytes());
 
-    let cksum = icmp_checksum(&pkt);
-    pkt[2..4].copy_from_slice(&cksum.to_be_bytes());
+    // The kernel fills the ICMPv6 checksum: it covers a pseudo-header with the source address.
+    if !v6 {
+        let cksum = icmp_checksum(&pkt);
+        pkt[2..4].copy_from_slice(&cksum.to_be_bytes());
+    }
     pkt
 }
 
@@ -407,6 +469,48 @@ fn icmp_checksum(data: &[u8]) -> u16 {
     !(sum as u16)
 }
 
+async fn resolve_traceroute_ip(
+    host: &str,
+    deadline: tokio::time::Instant,
+) -> Result<IpAddr, TracerouteProbeError> {
+    if let Ok(ip) = host.parse::<IpAddr>() {
+        return Ok(ip);
+    }
+
+    let addrs = lookup_traceroute_host(host, deadline).await?;
+    pick_traceroute_addr(&addrs).ok_or_else(|| TracerouteProbeError {
+        code: "dns_no_records",
+        detail: "no address records found".to_string(),
+    })
+}
+
+/// Dual-stack hosts keep tracing over IPv4, as they did before IPv6 support; IPv6 is used only
+/// when the host has no A record.
+fn pick_traceroute_addr(addrs: &[IpAddr]) -> Option<IpAddr> {
+    addrs
+        .iter()
+        .find(|ip| ip.is_ipv4())
+        .or(addrs.first())
+        .copied()
+}
+
+async fn lookup_traceroute_host(
+    host: &str,
+    deadline: tokio::time::Instant,
+) -> Result<Vec<IpAddr>, TracerouteProbeError> {
+    let addrs = tokio::time::timeout_at(deadline, lookup_host((host, 0)))
+        .await
+        .map_err(|_| TracerouteProbeError {
+            code: "timeout",
+            detail: "dns lookup timeout".to_string(),
+        })?
+        .map_err(|err| TracerouteProbeError {
+            code: "dns_error",
+            detail: err.to_string(),
+        })?;
+    Ok(addrs.map(|addr| addr.ip()).collect())
+}
+
 pub(crate) async fn resolve_traceroute_ipv4(
     host: &str,
     deadline: tokio::time::Instant,
@@ -421,21 +525,12 @@ pub(crate) async fn resolve_traceroute_ipv4(
         };
     }
 
-    let addrs = tokio::time::timeout_at(deadline, lookup_host((host, 0)))
-        .await
-        .map_err(|_| TracerouteProbeError {
-            code: "timeout",
-            detail: "dns lookup timeout".to_string(),
-        })?
-        .map_err(|err| TracerouteProbeError {
-            code: "dns_error",
-            detail: err.to_string(),
-        })?;
+    let addrs = lookup_traceroute_host(host, deadline).await?;
 
     let mut first_v4 = None;
     let mut has_v6 = false;
-    for addr in addrs {
-        match addr.ip() {
+    for ip in addrs {
+        match ip {
             IpAddr::V4(v4) => {
                 if first_v4.is_none() {
                     first_v4 = Some(v4);
@@ -644,7 +739,7 @@ pub(crate) fn average_rtt_ms(hops: &[HopResult]) -> Option<f64> {
 
 pub(crate) fn traceroute_extra_v1(
     result: &RawTracerouteResult,
-    origin_ip: Option<Ipv4Addr>,
+    origin_ip: Option<IpAddr>,
     rdns: &HashMap<IpAddr, String>,
 ) -> Value {
     let hops = build_hop_entries(&result.hops, rdns);
@@ -667,4 +762,153 @@ pub(crate) fn traceroute_extra_v1(
         "queries_per_hop": TRACEROUTE_QUERIES_PER_HOP as u64,
         "hops": hops,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const IDENT: u16 = 0x1234;
+    const SEQ: u16 = 7;
+
+    fn echo(icmp_type: u8, ident: u16, seq: u16) -> Vec<u8> {
+        let mut pkt = vec![icmp_type, 0, 0, 0];
+        pkt.extend_from_slice(&ident.to_be_bytes());
+        pkt.extend_from_slice(&seq.to_be_bytes());
+        pkt
+    }
+
+    fn icmp_error(icmp_type: u8, quoted_header: &[u8], quoted_echo: &[u8]) -> Vec<u8> {
+        let mut pkt = vec![icmp_type, 0, 0, 0, 0, 0, 0, 0];
+        pkt.extend_from_slice(quoted_header);
+        pkt.extend_from_slice(quoted_echo);
+        pkt
+    }
+
+    fn ipv6_header(next_header: u8) -> [u8; IPV6_HEADER_LEN] {
+        let mut header = [0u8; IPV6_HEADER_LEN];
+        header[0] = 0x60;
+        header[IPV6_NEXT_HEADER_OFFSET] = next_header;
+        header
+    }
+
+    #[test]
+    fn classifies_icmpv6_replies_to_our_probe() {
+        let quoted = ipv6_header(IPPROTO_ICMPV6);
+        let probe = echo(ICMPV6_ECHO_REQUEST, IDENT, SEQ);
+
+        assert_eq!(
+            classify_reply(&echo(ICMPV6_ECHO_REPLY, IDENT, SEQ), true, IDENT, SEQ),
+            Some(ReplyKind::EchoReply)
+        );
+        assert_eq!(
+            classify_reply(
+                &icmp_error(ICMPV6_TIME_EXCEEDED, &quoted, &probe),
+                true,
+                IDENT,
+                SEQ
+            ),
+            Some(ReplyKind::TimeExceeded)
+        );
+        assert_eq!(
+            classify_reply(
+                &icmp_error(ICMPV6_DEST_UNREACHABLE, &quoted, &probe),
+                true,
+                IDENT,
+                SEQ
+            ),
+            Some(ReplyKind::DestUnreachable)
+        );
+    }
+
+    #[test]
+    fn ignores_icmpv6_messages_that_are_not_for_our_probe() {
+        let quoted = ipv6_header(IPPROTO_ICMPV6);
+        let other_probe = echo(ICMPV6_ECHO_REQUEST, IDENT + 1, SEQ);
+        let udp_quote = ipv6_header(17);
+        let probe = echo(ICMPV6_ECHO_REQUEST, IDENT, SEQ);
+
+        for packet in [
+            echo(ICMPV6_ECHO_REPLY, IDENT, SEQ + 1),
+            icmp_error(ICMPV6_TIME_EXCEEDED, &quoted, &other_probe),
+            icmp_error(ICMPV6_TIME_EXCEEDED, &udp_quote, &probe),
+            // Our own request looped back when tracing a local address.
+            echo(ICMPV6_ECHO_REQUEST, IDENT, SEQ),
+            // ICMPv4 type numbers mean something else in ICMPv6.
+            echo(ICMP_ECHO_REPLY, IDENT, SEQ),
+        ] {
+            assert_eq!(classify_reply(&packet, true, IDENT, SEQ), None);
+        }
+    }
+
+    #[test]
+    fn classifies_icmpv4_replies_to_our_probe() {
+        let mut quoted = [0u8; IP_HEADER_MIN_LEN];
+        quoted[0] = 0x45;
+        let probe = echo(ICMP_ECHO_REQUEST, IDENT, SEQ);
+
+        assert_eq!(
+            classify_reply(&echo(ICMP_ECHO_REPLY, IDENT, SEQ), false, IDENT, SEQ),
+            Some(ReplyKind::EchoReply)
+        );
+        assert_eq!(
+            classify_reply(
+                &icmp_error(ICMP_TIME_EXCEEDED, &quoted, &probe),
+                false,
+                IDENT,
+                SEQ
+            ),
+            Some(ReplyKind::TimeExceeded)
+        );
+        assert_eq!(
+            classify_reply(
+                &icmp_error(ICMP_DEST_UNREACHABLE, &quoted, &probe),
+                false,
+                IDENT,
+                SEQ
+            ),
+            Some(ReplyKind::DestUnreachable)
+        );
+        assert_eq!(
+            classify_reply(&echo(ICMPV6_ECHO_REPLY, IDENT, SEQ), false, IDENT, SEQ),
+            None
+        );
+    }
+
+    #[test]
+    fn icmpv6_echo_request_leaves_checksum_to_the_kernel() {
+        let v4 = build_echo_request(false, IDENT, SEQ);
+        assert_eq!(v4[0], ICMP_ECHO_REQUEST);
+        assert_eq!(icmp_checksum(&v4), 0, "IPv4 checksum must verify");
+
+        let v6 = build_echo_request(true, IDENT, SEQ);
+        assert_eq!(v6[0], ICMPV6_ECHO_REQUEST);
+        assert_eq!(v6[2..4], [0, 0]);
+        assert_eq!(v6[4..8], v4[4..8]);
+    }
+
+    #[test]
+    fn dual_stack_hosts_keep_tracing_over_ipv4() {
+        let v4: IpAddr = "192.0.2.1".parse().unwrap();
+        let v6: IpAddr = "2001:db8::1".parse().unwrap();
+
+        assert_eq!(pick_traceroute_addr(&[v6, v4]), Some(v4));
+        assert_eq!(pick_traceroute_addr(&[v6]), Some(v6));
+        assert_eq!(pick_traceroute_addr(&[]), None);
+    }
+
+    #[tokio::test]
+    async fn only_icmp_mode_accepts_ipv6_literals() {
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(1);
+        let v6: IpAddr = "2001:db8::1".parse().unwrap();
+
+        assert_eq!(
+            resolve_traceroute_ip("2001:db8::1", deadline).await.ok(),
+            Some(v6)
+        );
+        let err = resolve_traceroute_ipv4("2001:db8::1", deadline)
+            .await
+            .unwrap_err();
+        assert_eq!(err.code, "ipv6_not_supported");
+    }
 }

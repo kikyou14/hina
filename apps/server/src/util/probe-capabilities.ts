@@ -1,17 +1,21 @@
 import { isRecord } from "./lang";
 
-export function capabilitySupportsTracerouteTcpSizePair(cap: unknown): boolean {
-  if (!isRecord(cap)) return false;
+function probeCapability(cap: unknown, probe: string): Record<string, unknown> | null {
+  if (!isRecord(cap)) return null;
   const probes = cap["probes"];
-  if (!isRecord(probes)) return false;
-  const traceroute = probes["traceroute"];
-  return isRecord(traceroute) && traceroute["tcpSizePair"] === true;
+  if (!isRecord(probes)) return null;
+  const entry = probes[probe];
+  return isRecord(entry) ? entry : null;
+}
+
+export function capabilitySupportsTracerouteTcpSizePair(cap: unknown): boolean {
+  return probeCapability(cap, "traceroute")?.["tcpSizePair"] === true;
+}
+
+export function capabilitySupportsTracerouteIcmpIpv6(cap: unknown): boolean {
+  return probeCapability(cap, "traceroute")?.["icmpIpv6"] === true;
 }
 
 export function capabilitySupportsTcpPacketSize(cap: unknown): boolean {
-  if (!isRecord(cap)) return false;
-  const probes = cap["probes"];
-  if (!isRecord(probes)) return false;
-  const tcp = probes["tcp"];
-  return isRecord(tcp) && tcp["packetSize"] === true;
+  return probeCapability(cap, "tcp")?.["packetSize"] === true;
 }

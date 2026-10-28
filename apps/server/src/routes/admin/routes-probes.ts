@@ -11,7 +11,7 @@ import {
   probeTaskAgent,
   probeTaskGroup,
 } from "../../db/schema";
-import { computeTcpProbeSupportCounts } from "../../ws/probe-config";
+import { computeProbeSupportCounts, requiredProbeCapability } from "../../ws/probe-config";
 import {
   isRecord,
   MAX_NAME_LEN,
@@ -108,29 +108,35 @@ export function registerAdminProbeTaskRoutes(router: Hono<AppContext>) {
       agentsByTaskId.set(l.taskId, list);
     }
 
-    const tcpSupportByTaskId = await computeTcpProbeSupportCounts(db, tasks);
+    const supportByTaskId = await computeProbeSupportCounts(db, tasks);
 
     return c.json({
       total,
       limit,
       offset,
-      tasks: tasks.map((t) => ({
-        id: t.id,
-        name: t.name,
-        kind: t.kind,
-        enabled: t.enabled,
-        allAgents: t.allAgents,
-        traceRevealHopDetails: t.kind === "traceroute" ? t.traceRevealHopDetails : false,
-        intervalSec: t.intervalSec,
-        timeoutMs: t.timeoutMs,
-        target: safeJsonParse(t.targetJson),
-        createdAtMs: t.createdAtMs,
-        updatedAtMs: t.updatedAtMs,
-        groups: groupsByTaskId.get(t.id) ?? [],
-        agents: agentsByTaskId.get(t.id) ?? [],
-        tcpSizePairSupport: t.kind === "traceroute" ? (tcpSupportByTaskId.get(t.id) ?? null) : null,
-        tcpPacketSizeSupport: t.kind === "tcp" ? (tcpSupportByTaskId.get(t.id) ?? null) : null,
-      })),
+      tasks: tasks.map((t) => {
+        const target = safeJsonParse(t.targetJson);
+        const required = requiredProbeCapability(t.kind, target);
+        const support = supportByTaskId.get(t.id) ?? null;
+        return {
+          id: t.id,
+          name: t.name,
+          kind: t.kind,
+          enabled: t.enabled,
+          allAgents: t.allAgents,
+          traceRevealHopDetails: t.kind === "traceroute" ? t.traceRevealHopDetails : false,
+          intervalSec: t.intervalSec,
+          timeoutMs: t.timeoutMs,
+          target,
+          createdAtMs: t.createdAtMs,
+          updatedAtMs: t.updatedAtMs,
+          groups: groupsByTaskId.get(t.id) ?? [],
+          agents: agentsByTaskId.get(t.id) ?? [],
+          tcpSizePairSupport: required === "tracerouteTcpSizePair" ? support : null,
+          tracerouteIpv6Support: required === "tracerouteIcmpIpv6" ? support : null,
+          tcpPacketSizeSupport: required === "tcpPacketSize" ? support : null,
+        };
+      }),
     });
   });
 

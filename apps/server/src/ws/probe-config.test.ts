@@ -8,12 +8,13 @@ import * as schema from "../db/schema";
 import { getMigrationsFolder } from "../paths";
 import {
   buildProbeConfigForAgent,
-  computeTcpProbeSupportCounts,
+  computeProbeSupportCounts,
   fetchAgentProbeScope,
 } from "./probe-config";
 
 import {
   capabilitySupportsTcpPacketSize,
+  capabilitySupportsTracerouteIcmpIpv6,
   capabilitySupportsTracerouteTcpSizePair,
 } from "../util/probe-capabilities";
 
@@ -232,7 +233,7 @@ describe("buildProbeConfigForAgent — TCP dual-size traceroute capability gatin
   });
 });
 
-describe("computeTcpProbeSupportCounts", () => {
+describe("computeProbeSupportCounts", () => {
   let db: DbClient;
   let sqlite: Database;
 
@@ -293,7 +294,7 @@ describe("computeTcpProbeSupportCounts", () => {
     await seedAgentWithCap("a2", null, false);
     await seedAgentWithCap("a3", null, false);
 
-    const counts = await computeTcpProbeSupportCounts(db, [
+    const counts = await computeProbeSupportCounts(db, [
       { id: "t-all", kind: "traceroute", targetJson: TCP_TARGET_JSON, allAgents: true },
     ]);
 
@@ -310,7 +311,7 @@ describe("computeTcpProbeSupportCounts", () => {
       createdAtMs: NOW_MS,
     });
 
-    const counts = await computeTcpProbeSupportCounts(db, [
+    const counts = await computeProbeSupportCounts(db, [
       { id: "t-scoped", kind: "traceroute", targetJson: TCP_TARGET_JSON, allAgents: false },
     ]);
 
@@ -330,7 +331,7 @@ describe("computeTcpProbeSupportCounts", () => {
       createdAtMs: NOW_MS,
     });
 
-    const counts = await computeTcpProbeSupportCounts(db, [
+    const counts = await computeProbeSupportCounts(db, [
       { id: "t-group", kind: "traceroute", targetJson: TCP_TARGET_JSON, allAgents: false },
     ]);
 
@@ -340,7 +341,7 @@ describe("computeTcpProbeSupportCounts", () => {
   test("omits non-TCP traceroute tasks and other probe kinds", async () => {
     await seedAgentWithCap("a1", null, false);
 
-    const counts = await computeTcpProbeSupportCounts(db, [
+    const counts = await computeProbeSupportCounts(db, [
       {
         id: "icmp",
         kind: "traceroute",
@@ -359,7 +360,7 @@ describe("computeTcpProbeSupportCounts", () => {
   });
 
   test("returns an empty map when no TCP dual-size tasks are present", async () => {
-    const counts = await computeTcpProbeSupportCounts(db, []);
+    const counts = await computeProbeSupportCounts(db, []);
     expect(counts.size).toBe(0);
   });
 });
@@ -427,7 +428,7 @@ describe("TCP fixed packet size capability", () => {
         port: 443,
         packetSize: 1200,
       });
-      const counts = await computeTcpProbeSupportCounts(db, [
+      const counts = await computeProbeSupportCounts(db, [
         {
           id: "sized",
           kind: "tcp",
@@ -436,6 +437,79 @@ describe("TCP fixed packet size capability", () => {
         },
       ]);
       expect(counts.get("sized")).toEqual({ targetAgents: 2, unsupportedAgents: 1 });
+    } finally {
+      sqlite.close();
+    }
+  });
+});
+
+describe("ICMP IPv6 traceroute capability", () => {
+  test("requires its own exact capability", () => {
+    expect(
+      capabilitySupportsTracerouteIcmpIpv6({ probes: { traceroute: { icmpIpv6: true } } }),
+    ).toBe(true);
+    for (const cap of [
+      null,
+      {},
+      { probes: { traceroute: { tcpSizePair: true } } },
+      { probes: { traceroute: { icmpIpv6: "true" } } },
+    ]) {
+      expect(capabilitySupportsTracerouteIcmpIpv6(cap)).toBe(false);
+    }
+  });
+
+  test("withholds only IPv6 literal targets from agents without the capability", async () => {
+    const { db, sqlite } = createTestDb();
+    try {
+      await seedAgent(db, "a1", null);
+      await seedAllAgentsTask(db, "v4", "traceroute", { host: "203.0.113.10" });
+      await seedAllAgentsTask(db, "hostname", "traceroute", { host: "example.com" });
+      await seedAllAgentsTask(db, "v6", "traceroute", { host: "2001:db8::1" });
+      const scope = { agentId: "a1", groupId: null };
+
+      const legacy = await buildProbeConfigForAgent(db, "a1", { scope, rev: 1 });
+      expect(legacy.tasks.map((t) => t.id).sort()).toEqual(["hostname", "v4"]);
+
+      const capable = await buildProbeConfigForAgent(db, "a1", {
+        scope,
+        rev: 2,
+        supportsTracerouteIcmpIpv6: true,
+      });
+      expect(capable.tasks.map((t) => t.id).sort()).toEqual(["hostname", "v4", "v6"]);
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  test("counts target agents that would skip an IPv6 traceroute", async () => {
+    const { db, sqlite } = createTestDb();
+    try {
+      for (const [id, cap] of [
+        ["new", { probes: { traceroute: { icmpIpv6: true } } }],
+        ["old", { probes: { traceroute: { tcpSizePair: true } } }],
+      ] as const) {
+        await seedAgent(db, id, null);
+        await db
+          .insert(schema.agentStatus)
+          .values({ agentId: id, lastCapabilitiesJson: JSON.stringify(cap), updatedAtMs: NOW_MS });
+      }
+
+      const counts = await computeProbeSupportCounts(db, [
+        {
+          id: "v6",
+          kind: "traceroute",
+          targetJson: JSON.stringify({ host: "2001:db8::1" }),
+          allAgents: true,
+        },
+        {
+          id: "v4",
+          kind: "traceroute",
+          targetJson: JSON.stringify({ host: "203.0.113.10" }),
+          allAgents: true,
+        },
+      ]);
+      expect(counts.get("v6")).toEqual({ targetAgents: 2, unsupportedAgents: 1 });
+      expect(counts.has("v4")).toBe(false);
     } finally {
       sqlite.close();
     }

@@ -316,7 +316,11 @@ function NormalHopRow({ hop, isLast }: { hop: Hop; isLast: boolean }) {
                   {hostname}
                 </p>
               )}
-              {ip && <p className="text-muted-foreground truncate font-mono text-sm">{ip}</p>}
+              {ip && (
+                <p className="text-muted-foreground truncate font-mono text-sm" title={ip}>
+                  {ip}
+                </p>
+              )}
               {!hostname && !ip && <p className="text-muted-foreground text-sm">-</p>}
               {asnTag && (
                 <div className="flex items-center gap-2 pt-1">

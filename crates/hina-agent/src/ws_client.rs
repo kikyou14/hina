@@ -577,12 +577,14 @@ fn default_capabilities() -> Value {
         serde_json::json!({
             "protocols": ["icmp", "tcp"],
             "tcpSizePair": true,
+            "icmpIpv6": true,
             "resultVersions": [1, 2]
         })
     } else {
         serde_json::json!({
             "protocols": ["icmp"],
             "tcpSizePair": false,
+            "icmpIpv6": true,
             "resultVersions": [1]
         })
     };

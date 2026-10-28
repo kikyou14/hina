@@ -239,14 +239,11 @@ export function ProbeTaskForm(props: {
               setError({ text: t("probes.form.invalidHost"), field: "host" });
               return;
             }
-            if (kind === "traceroute" && isIpv6Literal(trimmedHost)) {
-              setError({
-                text: t("probes.form.tracerouteIpv6NotSupported"),
-                field: "host",
-              });
-              return;
-            }
             if (kind === "traceroute" && tracerouteProtocol === "tcp") {
+              if (isIpv6Literal(trimmedHost)) {
+                setError({ text: t("probes.form.tracerouteTcpIpv4Only"), field: "host" });
+                return;
+              }
               const p = parseIntegerInput(tracerouteTcpPort);
               if (p === null || !isValidPort(p)) {
                 setError({ text: t("probes.form.invalidPort"), field: "port" });

@@ -59,11 +59,13 @@ function ProbeScope({ task: tsk }: { task: AdminProbeTask }) {
   return <>{t("probes.table.agents", { count: tsk.agents.length })}</>;
 }
 
-function ProbeTcpUnsupportedWarning({ task: tsk }: { task: AdminProbeTask }) {
+function ProbeUnsupportedWarning({ task: tsk }: { task: AdminProbeTask }) {
   const { t } = useTranslation();
-  const support = tsk.tcpSizePairSupport ?? tsk.tcpPacketSizeSupport;
+  const tcpSupport = tsk.tcpSizePairSupport ?? tsk.tcpPacketSizeSupport;
+  const support = tcpSupport ?? tsk.tracerouteIpv6Support;
   if (!support || support.unsupportedAgents === 0) return null;
 
+  const keys = tcpSupport ? "probes.tcpUnsupported" : "probes.tracerouteIpv6Unsupported";
   const runsNowhere = support.targetAgents - support.unsupportedAgents === 0;
   return (
     <span
@@ -74,8 +76,8 @@ function ProbeTcpUnsupportedWarning({ task: tsk }: { task: AdminProbeTask }) {
       }`}
       title={
         runsNowhere
-          ? t("probes.tcpUnsupported.noneTitle", { total: support.targetAgents })
-          : t("probes.tcpUnsupported.someTitle", {
+          ? t(`${keys}.noneTitle`, { total: support.targetAgents })
+          : t(`${keys}.someTitle`, {
               unsupported: support.unsupportedAgents,
               total: support.targetAgents,
             })
@@ -83,8 +85,8 @@ function ProbeTcpUnsupportedWarning({ task: tsk }: { task: AdminProbeTask }) {
     >
       <AlertTriangle className="size-3 shrink-0" />
       {runsNowhere
-        ? t("probes.tcpUnsupported.noneLabel")
-        : t("probes.tcpUnsupported.someLabel", {
+        ? t(`${keys}.noneLabel`)
+        : t(`${keys}.someLabel`, {
             unsupported: support.unsupportedAgents,
             total: support.targetAgents,
           })}
@@ -328,7 +330,7 @@ export function ProbeTasksPage() {
                       <span className="max-w-full truncate">
                         <ProbeScope task={tsk} />
                       </span>
-                      <ProbeTcpUnsupportedWarning task={tsk} />
+                      <ProbeUnsupportedWarning task={tsk} />
                     </div>,
                   ]}
                   aside={<EnabledBadge enabled={tsk.enabled} />}

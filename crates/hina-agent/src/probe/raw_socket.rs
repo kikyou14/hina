@@ -1,7 +1,7 @@
 use socket2::Socket;
 use std::{
     io,
-    net::{IpAddr, Ipv4Addr},
+    net::{IpAddr, Ipv4Addr, Ipv6Addr},
 };
 use tokio::io::unix::AsyncFd;
 
@@ -56,11 +56,19 @@ pub(crate) async fn async_recv_from(
     }
 }
 
-pub(crate) async fn probe_origin_ip(target_ip: Ipv4Addr) -> Option<Ipv4Addr> {
-    let socket = tokio::net::UdpSocket::bind("0.0.0.0:0").await.ok()?;
+/// Source address the kernel would pick for `target_ip`; `None` when there is no route.
+pub(crate) async fn probe_origin_addr(target_ip: IpAddr) -> Option<IpAddr> {
+    let bind_ip = match target_ip {
+        IpAddr::V4(_) => IpAddr::V4(Ipv4Addr::UNSPECIFIED),
+        IpAddr::V6(_) => IpAddr::V6(Ipv6Addr::UNSPECIFIED),
+    };
+    let socket = tokio::net::UdpSocket::bind((bind_ip, 0)).await.ok()?;
     socket.connect((target_ip, 33434)).await.ok()?;
-    let local = socket.local_addr().ok()?;
-    match local.ip() {
+    socket.local_addr().ok().map(|local| local.ip())
+}
+
+pub(crate) async fn probe_origin_ip(target_ip: Ipv4Addr) -> Option<Ipv4Addr> {
+    match probe_origin_addr(IpAddr::V4(target_ip)).await? {
         IpAddr::V4(v4) => Some(v4),
         IpAddr::V6(_) => None,
     }

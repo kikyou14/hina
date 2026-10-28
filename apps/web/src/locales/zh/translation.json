@@ -351,6 +351,12 @@
       "noneLabel": "无节点支持",
       "noneTitle": "{{total}} 个目标节点均不支持此 TCP 探测模式；在有支持的节点接入前，该任务不会在任何节点执行。"
     },
+    "tracerouteIpv6Unsupported": {
+      "someLabel": "{{unsupported}}/{{total}} 不支持",
+      "someTitle": "{{total}} 个目标节点中有 {{unsupported}} 个不支持 IPv6 Traceroute，将跳过该任务；升级这些节点的 Agent 后即可执行。",
+      "noneLabel": "无节点支持",
+      "noneTitle": "{{total}} 个目标节点均不支持 IPv6 Traceroute；在升级后的 Agent 接入前，该任务不会在任何节点执行。"
+    },
     "form": {
       "tcpPacketSize": "TCP 探测模式",
       "tcpSystemConnect": "系统建连（默认）",
@@ -381,7 +387,7 @@
       "invalidUrl": "无效的 URL：必须以 http:// 或 https:// 开头。",
       "invalidPacketSize": "无效的包尺寸：必须是 40–1500 字节之间的整数。",
       "duplicatePacketSizes": "两个包尺寸不能相同。",
-      "tracerouteIpv6NotSupported": "Traceroute 仅支持 IPv4 目标（不支持 IPv6）。",
+      "tracerouteTcpIpv4Only": "TCP 双尺寸对比需要 IPv4 地址或具有 IPv4 记录的域名。",
       "requestFailed": "请求失败。"
     },
     "deleteConfirm": "确定要删除此任务吗？",
