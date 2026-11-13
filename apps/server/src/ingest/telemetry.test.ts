@@ -170,3 +170,74 @@ describe("telemetry ingest split", () => {
     }
   });
 });
+
+describe("traffic counter deltas", () => {
+  const base = 1_700_000_000_000;
+  let db: DbClient;
+  let sqlite: Database;
+
+  beforeEach(async () => {
+    const r = createTestDb();
+    db = r.db;
+    sqlite = r.sqlite;
+    await seedAgent(db, "a1");
+  });
+  afterEach(() => sqlite.close());
+
+  async function ingestRx(
+    samples: Array<{ atSec: number; uptimeSec: number | null; rx: number }>,
+  ): Promise<number[]> {
+    const deltas: number[] = [];
+    for (const s of samples) {
+      const result = await db.transaction((tx) =>
+        ingestTelemetryTrafficAndRollup(
+          tx,
+          telemetryArgs("a1", {
+            recvTsMs: base + s.atSec * 1000,
+            uptimeSec: s.uptimeSec,
+            rxBytesTotal: s.rx,
+          }),
+        ),
+      );
+      deltas.push(result.deltaRx);
+    }
+    return deltas;
+  }
+
+  test("re-baselines when the total drops without a reboot", async () => {
+    const deltas = await ingestRx([
+      { atSec: 0, uptimeSec: 86_400, rx: 10_000 },
+      { atSec: 60, uptimeSec: 86_460, rx: 9_000 },
+      { atSec: 120, uptimeSec: 86_520, rx: 9_500 },
+    ]);
+    expect(deltas).toEqual([0, 0, 500]);
+
+    const [day] = await db.select().from(schema.trafficDay);
+    expect(day!.rxBytes).toBe(500);
+  });
+
+  test("counts the whole total after a reboot", async () => {
+    const deltas = await ingestRx([
+      { atSec: 0, uptimeSec: 86_400, rx: 10_000 },
+      { atSec: 300, uptimeSec: 60, rx: 2_000 },
+      { atSec: 360, uptimeSec: 120, rx: 2_500 },
+    ]);
+    expect(deltas).toEqual([0, 2_000, 500]);
+  });
+
+  test("counts the whole total after a reboot even above the old total", async () => {
+    const deltas = await ingestRx([
+      { atSec: 0, uptimeSec: 300, rx: 1_000 },
+      { atSec: 3_600, uptimeSec: 600, rx: 5_000 },
+    ]);
+    expect(deltas).toEqual([0, 5_000]);
+  });
+
+  test("re-baselines on a drop when uptime is missing", async () => {
+    const deltas = await ingestRx([
+      { atSec: 0, uptimeSec: null, rx: 10_000 },
+      { atSec: 300, uptimeSec: null, rx: 2_000 },
+    ]);
+    expect(deltas).toEqual([0, 0]);
+  });
+});

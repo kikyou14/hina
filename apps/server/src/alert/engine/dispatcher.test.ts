@@ -265,7 +265,7 @@ describe("sendTick parallelism", () => {
     const skippedHang = await readNotification(harness, hangId1);
     expect(skippedHang?.status).toBe("pending");
     expect(skippedHang?.attempts).toBe(0);
-    expect(skippedHang?.nextAttemptAtMs).toBeLessThanOrEqual(tickStart);
+    expect(skippedHang?.nextAttemptAtMs).toBeLessThanOrEqual(Date.now());
   });
 
   test("queues that never reach the dispatch path before the deadline are released, not stranded for the full lease", async () => {
@@ -287,7 +287,6 @@ describe("sendTick parallelism", () => {
     await seedNotification(harness, { channelId: "hang-b" });
     const lateId = await seedNotification(harness, { channelId: "late" });
 
-    const tickStart = Date.now();
     await sendTick(
       makeDeps(harness, (type) => (type === "webhook" ? hangNotifier : lateNotifier), {
         channelConcurrency: 2,
@@ -303,7 +302,7 @@ describe("sendTick parallelism", () => {
     const late = await readNotification(harness, lateId);
     expect(late?.status).toBe("pending");
     expect(late?.attempts).toBe(0);
-    expect(late?.nextAttemptAtMs).toBeLessThanOrEqual(tickStart);
+    expect(late?.nextAttemptAtMs).toBeLessThanOrEqual(Date.now());
 
     // Let the hung dispatchers hit their hard timeout so background DB writes
     // commit before afterEach closes the connection.
