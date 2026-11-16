@@ -1,8 +1,14 @@
-use std::{net::IpAddr, sync::Arc, time::Duration};
+use std::{net::IpAddr, sync::Arc};
 
 use surge_ping::{PingIdentifier, PingSequence};
 
-use super::{classify_probe_error, outcome::ProbeOutcome, remaining_until, resolve_ip};
+use super::{
+    classify_probe_error,
+    family::{FamilyPolicy, resolve_first},
+    outcome::ProbeOutcome,
+    remaining_until,
+    sampling::{SAMPLE_INTERVAL, SampleStats, compute_stats, sample_count},
+};
 
 #[derive(Clone)]
 pub(crate) struct IcmpClients {
@@ -34,22 +40,13 @@ impl IcmpClients {
     }
 }
 
-const ICMP_PROBE_COUNT: u8 = 5;
-const ICMP_SEND_INTERVAL: Duration = Duration::from_millis(200);
-const ICMP_MIN_PER_PROBE_TIMEOUT: Duration = Duration::from_millis(500);
-
-pub(crate) struct IcmpPingStats {
-    pub(crate) avg_rtt_ms: u64,
-    pub(crate) loss_pct: f64,
-    pub(crate) jitter_ms: Option<f64>,
-}
-
 pub(crate) async fn probe(
     icmp: &IcmpClients,
     host: &str,
+    family: FamilyPolicy,
     deadline: tokio::time::Instant,
 ) -> ProbeOutcome {
-    match surge_icmp_ping(icmp, host, deadline).await {
+    match surge_icmp_ping(icmp, host, family, deadline).await {
         Ok(stats) => {
             let mut outcome = ProbeOutcome::success(stats.avg_rtt_ms).with_loss_pct(stats.loss_pct);
             if let Some(jitter) = stats.jitter_ms {
@@ -61,50 +58,15 @@ pub(crate) async fn probe(
     }
 }
 
-pub(crate) fn compute_stats(probe_count: u8, results: &[Duration]) -> IcmpPingStats {
-    let sent = probe_count as f64;
-    let received = results.len() as f64;
-    let loss_pct = (sent - received) / sent * 100.0;
-
-    let avg_rtt_ms = if results.is_empty() {
-        0
-    } else {
-        let sum: Duration = results.iter().sum();
-        (sum / results.len() as u32)
-            .as_millis()
-            .min(u64::MAX as u128) as u64
-    };
-
-    let jitter_ms = if results.len() >= 2 {
-        let mut diff_sum = 0.0f64;
-        for i in 1..results.len() {
-            let diff = (results[i].as_secs_f64() - results[i - 1].as_secs_f64()).abs();
-            diff_sum += diff;
-        }
-        Some(diff_sum / (results.len() - 1) as f64 * 1000.0)
-    } else {
-        None
-    };
-
-    IcmpPingStats {
-        avg_rtt_ms,
-        loss_pct,
-        jitter_ms,
-    }
-}
-
-fn compute_probe_count(remaining: Duration) -> u8 {
-    let budget_per_probe = ICMP_MIN_PER_PROBE_TIMEOUT + ICMP_SEND_INTERVAL;
-    let max = (remaining.as_millis() / budget_per_probe.as_millis()).min(ICMP_PROBE_COUNT as u128);
-    max.max(1) as u8
-}
-
 async fn surge_icmp_ping(
     icmp: &IcmpClients,
     host: &str,
+    family: FamilyPolicy,
     deadline: tokio::time::Instant,
-) -> anyhow::Result<IcmpPingStats> {
-    let ip = resolve_ip(host, deadline).await?;
+) -> anyhow::Result<SampleStats> {
+    let ip = resolve_first(host, family, deadline)
+        .await
+        .map_err(|err| anyhow::Error::msg(err.code))?;
     let remaining = remaining_until(deadline);
     if remaining.is_zero() {
         anyhow::bail!("timeout");
@@ -117,7 +79,7 @@ async fn surge_icmp_ping(
     .as_ref()
     .map_err(|init_err| anyhow::anyhow!("ICMP socket init failed: {init_err}"))?;
 
-    let probe_count = compute_probe_count(remaining);
+    let probe_count = sample_count(remaining);
     let per_probe_timeout = remaining / probe_count as u32;
     let ident = PingIdentifier(fastrand::u16(..));
 
@@ -142,7 +104,7 @@ async fn surge_icmp_ping(
         }
 
         if seq + 1 < probe_count as u16 {
-            let interval = ICMP_SEND_INTERVAL.min(remaining_until(deadline));
+            let interval = SAMPLE_INTERVAL.min(remaining_until(deadline));
             if !interval.is_zero() {
                 tokio::time::sleep(interval).await;
             }
@@ -153,5 +115,5 @@ async fn surge_icmp_ping(
         anyhow::bail!("timeout");
     }
 
-    Ok(compute_stats(probe_count, &rtts))
+    Ok(compute_stats(probe_count, rtts.len() as u8, &rtts))
 }

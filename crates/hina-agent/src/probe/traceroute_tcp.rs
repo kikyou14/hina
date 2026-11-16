@@ -1,27 +1,23 @@
-use std::{
-    collections::HashSet,
-    net::{IpAddr, Ipv4Addr, SocketAddr},
-    time::Duration,
-};
+use std::{collections::HashSet, io, net::IpAddr, time::Duration};
 
 use serde_json::Value;
-use socket2::{Protocol, SockAddr, Socket};
+use socket2::{SockAddr, Socket};
 use tokio::io::unix::AsyncFd;
 
 use super::{
     clamp_error,
+    family::{FamilyPolicy, IpFamily, resolve_first},
     outcome::ProbeOutcome,
+    raw_socket::{async_recv_from, async_send_to, probe_origin_addr, transport_payload},
     remaining_until,
     tcp_raw::{
-        ICMP_CODE_FRAGMENTATION_NEEDED, ICMP_DEST_UNREACHABLE, TCP_ACK, TCP_SYN,
-        attach_tcp_probe_filter, build_tcp_reset, build_tcp_syn, is_message_too_long,
-        parse_icmp_tcp_quote, parse_tcp_segment, set_dont_fragment, tcp_response_matches_probe,
+        ProbeFlow, QuoteKind, TCP_ACK, TCP_SYN, is_message_too_long, open_icmp_error_socket,
+        open_tcp_socket, parse_tcp_segment, reserve_source_port, set_hop_limit,
     },
     traceroute::{
         HopResult, TRACEROUTE_MAX_HOPS, TRACEROUTE_PER_HOP_TIMEOUT, TRACEROUTE_QUERIES_PER_HOP,
-        TRACEROUTE_RDNS_BUDGET_CAP, TRACEROUTE_START_TTL, TracerouteProbeError, async_recv_from,
-        async_send_to, average_rtt_ms, build_hop_entries, is_permission_error, probe_origin_ip,
-        rdns_best_effort, resolve_traceroute_ipv4, round_ms, strip_ip_header,
+        TRACEROUTE_RDNS_BUDGET_CAP, TRACEROUTE_START_TTL, TracerouteProbeError, average_rtt_ms,
+        build_hop_entries, is_permission_error, rdns_best_effort, round_ms,
     },
 };
 
@@ -47,7 +43,7 @@ pub(crate) const TCP_SIZE_PAIR_SUPPORTED: bool = false;
 
 // Sequence-number layout within one round. A target reply is attributed by its
 // acknowledgment number in the inclusive range `seq + 1 ..= seq + 1 +
-// payload_len` (payload up to 1460 bytes for a 1500-byte probe). If two sizes'
+// payload_len` (payload up to 1460 bytes for a 1500-byte IPv4 probe). If two sizes'
 // sequences sat only one apart, those ranges could collide — e.g. sizes [41,
 // 1400] both accept `S + 2` — and a reply would be credited to whichever pending
 // probe came first, fabricating a partial reach or a size divergence. Spacing the
@@ -72,15 +68,15 @@ pub(crate) fn derive_retry_sequence(nonce: u32, ttl: u8, size_index: usize) -> u
     derive_sequence(nonce, ttl, size_index).wrapping_add(SEQ_RETRY_STRIDE)
 }
 
-fn create_raw_socket(protocol: Protocol, label: &str) -> Result<Socket, TracerouteProbeError> {
-    super::tcp_raw::create_raw_socket(protocol).map_err(|e| TracerouteProbeError {
+fn socket_error(context: &str) -> impl FnOnce(io::Error) -> TracerouteProbeError + '_ {
+    move |e| TracerouteProbeError {
         code: if is_permission_error(&e) {
             "permission_denied"
         } else {
             "socket_error"
         },
-        detail: format!("failed to create {label} socket: {e}"),
-    })
+        detail: format!("{context}: {e}"),
+    }
 }
 
 /// Mutable per-size accumulator for one traceroute round.
@@ -90,7 +86,7 @@ pub(crate) struct SizeState {
     pub(crate) reached: bool,
     pub(crate) stopped: bool,
     pub(crate) error_code: Option<&'static str>,
-    pub(crate) path_mtu: Option<u16>,
+    pub(crate) path_mtu: Option<u32>,
     /// TTL of the hop entry recorded from an ICMP Fragmentation Needed report.
     /// That reporter sits at an earlier TTL than the probe that elicited it
     /// (the datagram must outlive the reporter to be forwarded into the
@@ -113,14 +109,6 @@ impl SizeState {
     }
 }
 
-/// Immutable identity of the round, used for response matching.
-pub(crate) struct RoundCtx {
-    pub(crate) source_ip: Ipv4Addr,
-    pub(crate) target_ip: Ipv4Addr,
-    pub(crate) source_port: u16,
-    pub(crate) dest_port: u16,
-}
-
 /// A probe awaiting a reply within the current TTL window.
 pub(crate) struct Pending {
     pub(crate) size_index: usize,
@@ -136,7 +124,7 @@ struct TargetReset {
 }
 
 pub(crate) struct TcpRunResult {
-    pub(crate) source_ip: Ipv4Addr,
+    pub(crate) source_ip: IpAddr,
     pub(crate) source_port: u16,
     pub(crate) states: [SizeState; 2],
     pub(crate) total_duration: Duration,
@@ -144,6 +132,7 @@ pub(crate) struct TcpRunResult {
 
 pub(crate) async fn probe(
     target: &str,
+    family: IpFamily,
     port: u16,
     packet_sizes: [u16; 2],
     deadline: tokio::time::Instant,
@@ -160,7 +149,7 @@ pub(crate) async fn probe(
         ));
     }
 
-    let target_ip = match resolve_traceroute_ipv4(target, deadline).await {
+    let target_ip = match resolve_first(target, FamilyPolicy::Only(family), deadline).await {
         Ok(ip) => ip,
         Err(err) => {
             return ProbeOutcome::failure(err.code).with_extra(tcp_error_extra(
@@ -184,64 +173,35 @@ pub(crate) async fn probe(
 }
 
 async fn run(
-    target_ip: Ipv4Addr,
+    target_ip: IpAddr,
     dest_port: u16,
     packet_sizes: [u16; 2],
     deadline: tokio::time::Instant,
 ) -> Result<TcpRunResult, TracerouteProbeError> {
-    let source_ip = probe_origin_ip(target_ip)
+    let source_ip = probe_origin_addr(target_ip)
         .await
         .ok_or_else(|| TracerouteProbeError {
-            code: "socket_error",
-            detail: "failed to determine source IPv4".to_string(),
+            code: "network_unreachable",
+            detail: format!("no route to {target_ip}"),
         })?;
 
     // Reserve an ephemeral source port for the whole round. The socket is never
     // connected; it only keeps the kernel from reusing the port.
-    let reserved = reserve_source_port(source_ip)?;
-    let source_port = reserved_port(&reserved)?;
-
-    let icmp = create_raw_socket(Protocol::ICMPV4, "ICMP")?;
-    let icmp_fd = AsyncFd::new(icmp).map_err(|e| TracerouteProbeError {
-        code: "socket_error",
-        detail: format!("AsyncFd(ICMP): {e}"),
-    })?;
-
-    let tcp = create_raw_socket(Protocol::TCP, "TCP")?;
-    // Bind the raw socket to the routing-selected source address so the kernel
-    // stamps the outgoing IPv4 header with exactly the address used in the TCP
-    // pseudo-header checksum. On a multi-homed or policy-routed host the kernel
-    // could otherwise pick a different source, which both invalidates the TCP
-    // checksum and makes ICMP quotes (matched on inner source IP) unrecognizable
-    // — the whole path would then read as timeout. Per raw(7), with IP_HDRINCL
-    // off the kernel builds the header and honors the bound local address.
-    let source_bind = SockAddr::from(SocketAddr::new(IpAddr::V4(source_ip), 0));
-    tcp.bind(&source_bind).map_err(|e| TracerouteProbeError {
-        code: "socket_error",
-        detail: format!("bind raw TCP socket to source {source_ip}: {e}"),
-    })?;
-    set_dont_fragment(&tcp).map_err(|e| TracerouteProbeError {
-        code: "socket_error",
-        detail: format!("enable DF: {e}"),
-    })?;
-    attach_tcp_probe_filter(&tcp, target_ip, dest_port, source_port).map_err(|e| {
+    let (reserved, source_port) =
+        reserve_source_port(source_ip).map_err(socket_error("bind port-reservation socket"))?;
+    let flow = ProbeFlow::new(source_ip, target_ip, source_port, dest_port).ok_or_else(|| {
         TracerouteProbeError {
             code: "socket_error",
-            detail: format!("attach TCP probe filter: {e}"),
+            detail: format!("source {source_ip} and target {target_ip} differ in family"),
         }
     })?;
-    let tcp_fd = AsyncFd::new(tcp).map_err(|e| TracerouteProbeError {
-        code: "socket_error",
-        detail: format!("AsyncFd(TCP): {e}"),
-    })?;
 
-    let ctx = RoundCtx {
-        source_ip,
-        target_ip,
-        source_port,
-        dest_port,
-    };
-    let dest = SockAddr::from(SocketAddr::new(IpAddr::V4(target_ip), 0));
+    let icmp = open_icmp_error_socket(flow.family()).map_err(socket_error("open ICMP socket"))?;
+    let icmp_fd = AsyncFd::new(icmp).map_err(socket_error("AsyncFd(ICMP)"))?;
+    let tcp = open_tcp_socket(&flow).map_err(socket_error("open raw TCP socket"))?;
+    let tcp_fd = AsyncFd::new(tcp).map_err(socket_error("AsyncFd(TCP)"))?;
+
+    let dest = flow.target_sockaddr();
     let nonce = fastrand::u32(..);
     let start = std::time::Instant::now();
 
@@ -262,7 +222,7 @@ async fn run(
         // any reply this round would be attributed to the wrong hop and could
         // fabricate a divergence. Fail closed like the ICMP path: record this TTL
         // as a timeout for every still-active size and move on without sending.
-        if let Err(e) = tcp_fd.get_ref().set_ttl_v4(ttl as u32) {
+        if let Err(e) = set_hop_limit(tcp_fd.get_ref(), flow.family(), ttl) {
             tracing::debug!(ttl, error = %e, "tcp traceroute set_ttl failed; recording timeout");
             for state in states.iter_mut() {
                 if !state.stopped {
@@ -288,14 +248,7 @@ async fn run(
             }
             let packet_size = states[index].packet_size;
             let seq = derive_sequence(nonce, ttl, index);
-            let segment = build_tcp_syn(
-                source_ip,
-                target_ip,
-                source_port,
-                dest_port,
-                seq,
-                packet_size,
-            );
+            let segment = flow.syn(seq, packet_size);
             let sent_at = std::time::Instant::now();
             match async_send_to(&tcp_fd, &segment, &dest).await {
                 Ok(()) => pending.push(Pending {
@@ -323,7 +276,7 @@ async fn run(
         let target_reset = receive_hop(
             &icmp_fd,
             &tcp_fd,
-            &ctx,
+            &flow,
             ttl,
             hop_deadline,
             &mut pending,
@@ -338,7 +291,7 @@ async fn run(
 
         if newly_reached {
             let reset_grace = if let Some(reset) = target_reset {
-                send_target_reset(&tcp_fd, &ctx, &dest, reset).await;
+                send_target_reset(&tcp_fd, &flow, &dest, reset).await;
                 reset
                     .observed_rtt
                     .max(TARGET_RESET_MIN_GRACE)
@@ -351,7 +304,7 @@ async fn run(
                 retry_pending_after_target_response(
                     &icmp_fd,
                     &tcp_fd,
-                    &ctx,
+                    &flow,
                     &dest,
                     ttl,
                     nonce,
@@ -390,7 +343,7 @@ async fn run(
 async fn receive_hop(
     icmp_fd: &AsyncFd<Socket>,
     tcp_fd: &AsyncFd<Socket>,
-    ctx: &RoundCtx,
+    flow: &ProbeFlow,
     ttl: u8,
     hop_deadline: tokio::time::Instant,
     pending: &mut Vec<Pending>,
@@ -411,8 +364,8 @@ async fn receive_hop(
             result = async_recv_from(icmp_fd, &mut icmp_buf) => {
                 match result {
                     Ok((n, from)) => {
-                        let msg = strip_ip_header(&icmp_buf[..n]);
-                        apply_icmp(msg, from, ctx, ttl, pending, states);
+                        let msg = transport_payload(flow.family(), &icmp_buf[..n]);
+                        apply_icmp(msg, from, flow, ttl, pending, states);
                         if has_newly_reached(states, reached_before) {
                             return None;
                         }
@@ -426,8 +379,8 @@ async fn receive_hop(
             result = async_recv_from(tcp_fd, &mut tcp_buf) => {
                 match result {
                     Ok((n, from)) => {
-                        let segment = strip_ip_header(&tcp_buf[..n]);
-                        let target_reset = apply_tcp(segment, from, ctx, ttl, pending, states);
+                        let segment = transport_payload(flow.family(), &tcp_buf[..n]);
+                        let target_reset = apply_tcp(segment, from, flow, ttl, pending, states);
                         if target_reset.is_some() || has_newly_reached(states, reached_before) {
                             return target_reset;
                         }
@@ -454,18 +407,11 @@ fn has_newly_reached(states: &[SizeState; 2], reached_before: [bool; 2]) -> bool
 
 async fn send_target_reset(
     tcp_fd: &AsyncFd<Socket>,
-    ctx: &RoundCtx,
+    flow: &ProbeFlow,
     dest: &SockAddr,
     reset: TargetReset,
 ) {
-    let segment = build_tcp_reset(
-        ctx.source_ip,
-        ctx.target_ip,
-        ctx.source_port,
-        ctx.dest_port,
-        reset.seq,
-    );
-    if let Err(error) = async_send_to(tcp_fd, &segment, dest).await {
+    if let Err(error) = async_send_to(tcp_fd, &flow.reset(reset.seq), dest).await {
         tracing::debug!(error = %error, "tcp traceroute target reset failed");
     }
 }
@@ -479,7 +425,7 @@ async fn send_target_reset(
 async fn retry_pending_after_target_response(
     icmp_fd: &AsyncFd<Socket>,
     tcp_fd: &AsyncFd<Socket>,
-    ctx: &RoundCtx,
+    flow: &ProbeFlow,
     dest: &SockAddr,
     ttl: u8,
     nonce: u32,
@@ -499,14 +445,7 @@ async fn retry_pending_after_target_response(
     for probe in unresolved {
         let index = probe.size_index;
         let seq = derive_retry_sequence(nonce, ttl, index);
-        let segment = build_tcp_syn(
-            ctx.source_ip,
-            ctx.target_ip,
-            ctx.source_port,
-            ctx.dest_port,
-            seq,
-            probe.packet_size,
-        );
+        let segment = flow.syn(seq, probe.packet_size);
         let sent_at = std::time::Instant::now();
         match async_send_to(tcp_fd, &segment, dest).await {
             Ok(()) => pending.push(Pending {
@@ -537,27 +476,21 @@ async fn retry_pending_after_target_response(
     let retry_deadline =
         tokio::time::Instant::now() + TRACEROUTE_PER_HOP_TIMEOUT.min(remaining_until(deadline));
     if let Some(reset) =
-        receive_hop(icmp_fd, tcp_fd, ctx, ttl, retry_deadline, pending, states).await
+        receive_hop(icmp_fd, tcp_fd, flow, ttl, retry_deadline, pending, states).await
     {
-        send_target_reset(tcp_fd, ctx, dest, reset).await;
+        send_target_reset(tcp_fd, flow, dest, reset).await;
     }
 }
 
 pub(crate) fn apply_icmp(
     msg: &[u8],
     from: IpAddr,
-    ctx: &RoundCtx,
+    flow: &ProbeFlow,
     ttl: u8,
     pending: &mut Vec<Pending>,
     states: &mut [SizeState; 2],
 ) {
-    let Some(quote) = parse_icmp_tcp_quote(
-        msg,
-        ctx.source_ip,
-        ctx.target_ip,
-        ctx.source_port,
-        ctx.dest_port,
-    ) else {
+    let Some(quote) = flow.match_icmp_quote(msg) else {
         return;
     };
 
@@ -569,81 +502,56 @@ pub(crate) fn apply_icmp(
     };
 
     let probe = pending.remove(pos);
-    let index = probe.size_index;
-    let rtt = probe.sent_at.elapsed();
-
-    if quote.icmp_type == ICMP_DEST_UNREACHABLE && quote.icmp_code == ICMP_CODE_FRAGMENTATION_NEEDED
-    {
-        // A downstream link is too small for this size: record the reporter as a
-        // hop, remember the next-hop MTU, and stop sending this size. The entry
-        // is display-only evidence — the reporter answered from an earlier TTL,
-        // so `frag_hop_ttl` marks it for exclusion from route comparison.
-        states[index].hops.push(HopResult {
-            ttl,
-            addr: Some(from),
-            rtt: Some(rtt),
-        });
-        states[index].path_mtu = quote.next_hop_mtu;
-        states[index].error_code = Some(ERR_PACKET_TOO_LARGE);
-        states[index].frag_hop_ttl = Some(ttl);
-        states[index].stopped = true;
-        return;
-    }
-
-    states[index].hops.push(HopResult {
+    let state = &mut states[probe.size_index];
+    state.hops.push(HopResult {
         ttl,
         addr: Some(from),
-        rtt: Some(rtt),
+        rtt: Some(probe.sent_at.elapsed()),
     });
 
-    // Time Exceeded is an ordinary intermediate hop — keep probing. Any
-    // Destination Unreachable, however, ends this size: from the target it means
-    // the host answered (treat as reached, rare for TCP); from an intermediate
-    // hop the path is blocked, so stop with the specific reason instead of
-    // burning the remaining TTLs re-hitting the same wall and timing out.
-    if quote.icmp_type == ICMP_DEST_UNREACHABLE {
-        states[index].stopped = true;
-        if from == IpAddr::V4(ctx.target_ip) {
-            states[index].reached = true;
-        } else {
-            states[index].error_code = Some(unreachable_error_code(quote.icmp_code));
+    match quote.kind {
+        // An ordinary intermediate hop: keep probing.
+        QuoteKind::TimeExceeded => {}
+        // A downstream link is too small for this size: remember the next-hop MTU and stop sending
+        // this size. The hop entry is display-only evidence — the reporter answered from an earlier
+        // TTL, so `frag_hop_ttl` marks it for exclusion from route comparison.
+        QuoteKind::PacketTooBig { mtu } => {
+            state.path_mtu = mtu;
+            state.error_code = Some(ERR_PACKET_TOO_LARGE);
+            state.frag_hop_ttl = Some(ttl);
+            state.stopped = true;
         }
-    }
-}
-
-/// Map an ICMP Destination Unreachable code to a concise, stable error reason.
-/// (Fragmentation-needed, code 4, is handled separately as `packet_too_large`.)
-fn unreachable_error_code(code: u8) -> &'static str {
-    match code {
-        0 => "net_unreachable",
-        1 => "host_unreachable",
-        2 => "protocol_unreachable",
-        3 => "port_unreachable",
-        9 | 10 | 13 => "admin_prohibited",
-        _ => "dest_unreachable",
+        // Any Destination Unreachable ends this size: from the target it means the host answered
+        // (treat as reached, rare for TCP); from an intermediate hop the path is blocked, so stop
+        // with the specific reason instead of burning the remaining TTLs re-hitting the same wall.
+        QuoteKind::Unreachable(reason) => {
+            state.stopped = true;
+            if from == flow.target_ip() {
+                state.reached = true;
+            } else {
+                state.error_code = Some(reason.code());
+            }
+        }
     }
 }
 
 fn apply_tcp(
     segment: &[u8],
     from: IpAddr,
-    ctx: &RoundCtx,
+    flow: &ProbeFlow,
     ttl: u8,
     pending: &mut Vec<Pending>,
     states: &mut [SizeState; 2],
 ) -> Option<TargetReset> {
-    if from != IpAddr::V4(ctx.target_ip) {
+    if from != flow.target_ip() {
         return None;
     }
     let resp = parse_tcp_segment(segment)?;
-    // Reject anything not addressed to this round's source port.
-    if resp.src_port != ctx.dest_port || resp.dst_port != ctx.source_port {
-        return None;
-    }
 
-    if let Some(pos) = pending.iter().position(|p| {
-        tcp_response_matches_probe(&resp, ctx.dest_port, ctx.source_port, p.seq, p.packet_size)
-    }) {
+    if let Some(pos) = pending
+        .iter()
+        .position(|p| flow.matches_response(&resp, p.seq, p.packet_size))
+    {
         let probe = pending.remove(pos);
         let observed_rtt = probe.sent_at.elapsed();
         let target_reset =
@@ -651,7 +559,7 @@ fn apply_tcp(
                 seq: resp.ack,
                 observed_rtt,
             });
-        mark_reached(states, probe, ctx.target_ip, ttl, observed_rtt);
+        mark_reached(states, probe, flow.target_ip(), ttl, observed_rtt);
         return target_reset;
     }
 
@@ -661,37 +569,23 @@ fn apply_tcp(
 fn mark_reached(
     states: &mut [SizeState; 2],
     probe: Pending,
-    target_ip: Ipv4Addr,
+    target_ip: IpAddr,
     ttl: u8,
     rtt: Duration,
 ) {
     let index = probe.size_index;
     states[index].hops.push(HopResult {
         ttl,
-        addr: Some(IpAddr::V4(target_ip)),
+        addr: Some(target_ip),
         rtt: Some(rtt),
     });
     states[index].reached = true;
     states[index].stopped = true;
 }
 
-fn reserve_source_port(source_ip: Ipv4Addr) -> Result<Socket, TracerouteProbeError> {
-    super::tcp_raw::reserve_source_port(source_ip).map_err(|e| TracerouteProbeError {
-        code: "socket_error",
-        detail: format!("bind port-reservation socket: {e}"),
-    })
-}
-
-fn reserved_port(socket: &Socket) -> Result<u16, TracerouteProbeError> {
-    super::tcp_raw::reserved_port(socket).map_err(|e| TracerouteProbeError {
-        code: "socket_error",
-        detail: e.to_string(),
-    })
-}
-
 async fn assemble_outcome(
     target: &str,
-    target_ip: Ipv4Addr,
+    target_ip: IpAddr,
     port: u16,
     run_result: TcpRunResult,
 ) -> ProbeOutcome {
@@ -737,7 +631,7 @@ async fn assemble_outcome(
 
 fn enforce_extra_size(
     target: &str,
-    target_ip: Ipv4Addr,
+    target_ip: IpAddr,
     port: u16,
     run_result: &TcpRunResult,
     extra: Value,
@@ -775,7 +669,7 @@ fn serialized_len(value: &Value) -> usize {
 
 pub(crate) fn build_v2_extra(
     target: &str,
-    target_ip: Ipv4Addr,
+    target_ip: IpAddr,
     port: u16,
     run_result: &TcpRunResult,
     rdns: &std::collections::HashMap<IpAddr, String>,

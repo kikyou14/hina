@@ -61,11 +61,10 @@ function ProbeScope({ task: tsk }: { task: AdminProbeTask }) {
 
 function ProbeUnsupportedWarning({ task: tsk }: { task: AdminProbeTask }) {
   const { t } = useTranslation();
-  const tcpSupport = tsk.tcpSizePairSupport ?? tsk.tcpPacketSizeSupport;
-  const support = tcpSupport ?? tsk.tracerouteIpv6Support;
+  const support = tsk.capabilitySupport;
   if (!support || support.unsupportedAgents === 0) return null;
 
-  const keys = tcpSupport ? "probes.tcpUnsupported" : "probes.tracerouteIpv6Unsupported";
+  const keys = "probes.capabilityUnsupported";
   const runsNowhere = support.targetAgents - support.unsupportedAgents === 0;
   return (
     <span

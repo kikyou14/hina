@@ -1,56 +1,45 @@
 use std::{
-    collections::{HashSet, VecDeque},
+    collections::VecDeque,
     net::{IpAddr, SocketAddr},
     time::Duration,
 };
 
 use serde_json::Value;
-use tokio::{net::lookup_host, task::JoinSet};
+use tokio::task::JoinSet;
 
-use super::{clamp_error, outcome::ProbeOutcome, remaining_until};
+use super::{
+    clamp_error,
+    family::{FamilyPolicy, IpFamily, ResolveError, resolve},
+    outcome::ProbeOutcome,
+    remaining_until,
+    task::TcpMode,
+};
 
 const MAX_TCP_ADDRS: usize = 8;
 const TCP_CONNECT_IN_FLIGHT: usize = 2;
 const TCP_FALLBACK_DELAY: Duration = Duration::from_millis(250);
 
-#[derive(Debug)]
-struct TcpDnsError {
-    code: &'static str,
-    message: String,
-}
-
-impl std::fmt::Display for TcpDnsError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.message)
-    }
-}
-
-impl std::error::Error for TcpDnsError {}
-
 pub(crate) async fn probe(
     host: &str,
     port: u16,
-    packet_size: Option<u16>,
+    mode: TcpMode,
     deadline: tokio::time::Instant,
 ) -> ProbeOutcome {
-    let outcome = probe_inner(host, port, packet_size, deadline).await;
-    match packet_size {
-        Some(size) => outcome
-            .with_extra_field("kind", serde_json::json!("tcp"))
-            .with_extra_field("packet_size_bytes", serde_json::json!(size)),
-        None => outcome,
+    match mode {
+        TcpMode::Connect { family } => probe_connect(host, port, family, deadline).await,
+        TcpMode::Syn {
+            family,
+            packet_size,
+        } => super::tcp_syn::probe(host, port, family, packet_size, deadline).await,
     }
 }
 
-async fn probe_inner(
+async fn probe_connect(
     host: &str,
     port: u16,
-    packet_size: Option<u16>,
+    family: FamilyPolicy,
     deadline: tokio::time::Instant,
 ) -> ProbeOutcome {
-    if packet_size.is_some() && !super::tcp_syn::TCP_PACKET_SIZE_SUPPORTED {
-        return ProbeOutcome::failure("unsupported_platform");
-    }
     let remaining = remaining_until(deadline);
     if remaining.is_zero() {
         return tcp_probe_error(
@@ -64,15 +53,11 @@ async fn probe_inner(
         );
     }
 
-    let addrs = match resolve_tcp_addrs(host, port, packet_size.is_some(), deadline).await {
+    let addrs = match resolve_tcp_addrs(host, port, family, deadline).await {
         Ok(addrs) => addrs,
         Err(err) => {
-            let (code, message) = err
-                .downcast_ref::<TcpDnsError>()
-                .map(|dns| (dns.code, clamp_error(&dns.message)))
-                .unwrap_or(("dns_lookup_failed", clamp_error(&err.to_string())));
-            let last_error = tcp_last_error(None, code, None, &message);
-            return tcp_probe_error(code, host, port, &[], 0, Some(last_error), None);
+            let last_error = tcp_last_error(None, err.code, None, &err.detail);
+            return tcp_probe_error(err.code, host, port, &[], 0, Some(last_error), None);
         }
     };
 
@@ -90,7 +75,7 @@ async fn probe_inner(
     };
 
     let mut attempted: u64 = 1;
-    spawn_tcp_attempt(&mut join_set, first, packet_size, deadline);
+    spawn_tcp_attempt(&mut join_set, first, deadline);
 
     let mut fallback_armed = !queue.is_empty();
     let fallback_sleep = tokio::time::sleep(TCP_FALLBACK_DELAY);
@@ -115,7 +100,7 @@ async fn probe_inner(
             _ = &mut fallback_sleep, if fallback_armed && join_set.len() < TCP_CONNECT_IN_FLIGHT && !queue.is_empty() => {
                 let addr = queue.pop_front().expect("queue must not be empty");
                 attempted = attempted.saturating_add(1);
-                spawn_tcp_attempt(&mut join_set, addr, packet_size, deadline);
+                spawn_tcp_attempt(&mut join_set, addr, deadline);
                 fallback_armed = false;
             }
 
@@ -128,7 +113,13 @@ async fn probe_inner(
                     Ok((addr, Ok(latency_ms))) => {
                         tracing::debug!(host = %host, port = port, addr = %addr, latency_ms = latency_ms, "tcp probe connected");
                         join_set.abort_all();
-                        return ProbeOutcome::success(latency_ms);
+                        // Under the automatic family a failing IPv6 path silently falls back to
+                        // IPv4; recording the address keeps that visible in the results.
+                        return ProbeOutcome::success(latency_ms).with_extra(serde_json::json!({
+                            "kind": "tcp",
+                            "family": IpFamily::of(addr.ip()).label(),
+                            "addr": addr.to_string(),
+                        }));
                     }
                     Ok((addr, Err(err))) => {
                         let code = classify_tcp_io_error(&err);
@@ -160,7 +151,7 @@ async fn probe_inner(
                         break;
                     };
                     attempted = attempted.saturating_add(1);
-                    spawn_tcp_attempt(&mut join_set, next_addr, packet_size, deadline);
+                    spawn_tcp_attempt(&mut join_set, next_addr, deadline);
                 }
             }
         }
@@ -192,103 +183,36 @@ pub(crate) fn classify_tcp_io_error(err: &std::io::Error) -> &'static str {
     }
 }
 
+/// Connect order for `host`: IPv6 and IPv4 alternate, IPv6 first, capped at `MAX_TCP_ADDRS`.
 pub(crate) async fn resolve_tcp_addrs(
     host: &str,
     port: u16,
-    ipv4_only: bool,
+    family: FamilyPolicy,
     deadline: tokio::time::Instant,
-) -> anyhow::Result<Vec<SocketAddr>> {
-    if let Ok(ip) = host.parse::<IpAddr>() {
-        if ipv4_only && ip.is_ipv6() {
-            return Err(anyhow::Error::new(TcpDnsError {
-                code: "ipv6_not_supported",
-                message: "TCP packet size probes require IPv4".into(),
-            }));
-        }
-        return Ok(vec![SocketAddr::new(ip, port)]);
-    }
+) -> Result<Vec<SocketAddr>, ResolveError> {
+    let addrs = resolve(host, family, deadline).await?;
+    Ok(interleave_families(addrs)
+        .into_iter()
+        .map(|ip| SocketAddr::new(ip, port))
+        .collect())
+}
 
-    let remaining = remaining_until(deadline);
-    if remaining.is_zero() {
-        return Err(anyhow::Error::new(TcpDnsError {
-            code: "timeout",
-            message: "dns lookup timeout".to_string(),
-        }));
-    }
-
-    let addrs = tokio::time::timeout_at(deadline, lookup_host((host, port)))
-        .await
-        .map_err(|_| {
-            anyhow::Error::new(TcpDnsError {
-                code: "timeout",
-                message: "dns lookup timeout".to_string(),
-            })
-        })?
-        .map_err(|err| {
-            anyhow::Error::new(TcpDnsError {
-                code: "dns_lookup_failed",
-                message: err.to_string(),
-            })
-        })?;
-
-    let mut seen = HashSet::<SocketAddr>::new();
-    let mut v4 = Vec::<SocketAddr>::new();
-    let mut v6 = Vec::<SocketAddr>::new();
-
-    for addr in addrs {
-        if !seen.insert(addr) {
-            continue;
-        }
-
-        if addr.is_ipv4() {
-            v4.push(addr);
-        } else {
-            v6.push(addr);
-        }
-    }
-
-    if v4.is_empty() && v6.is_empty() {
-        return Err(anyhow::Error::new(TcpDnsError {
-            code: "dns_no_records",
-            message: "dns no records".to_string(),
-        }));
-    }
-
-    if ipv4_only {
-        if v4.is_empty() {
-            return Err(anyhow::Error::new(TcpDnsError {
-                code: "ipv6_not_supported",
-                message: "no IPv4 records found".into(),
-            }));
-        }
-        v4.truncate(MAX_TCP_ADDRS);
-        return Ok(v4);
-    }
-
-    let mut out = Vec::<SocketAddr>::with_capacity((v4.len() + v6.len()).min(MAX_TCP_ADDRS));
-    let mut v4_index = 0usize;
-    let mut v6_index = 0usize;
+fn interleave_families(addrs: Vec<IpAddr>) -> Vec<IpAddr> {
+    let (v6, v4): (Vec<IpAddr>, Vec<IpAddr>) = addrs.into_iter().partition(IpAddr::is_ipv6);
+    let mut v6 = v6.into_iter();
+    let mut v4 = v4.into_iter();
+    let mut out = Vec::with_capacity(MAX_TCP_ADDRS);
     while out.len() < MAX_TCP_ADDRS {
-        let mut pushed = false;
-        if v6_index < v6.len() {
-            out.push(v6[v6_index]);
-            v6_index += 1;
-            pushed = true;
-            if out.len() >= MAX_TCP_ADDRS {
-                break;
-            }
-        }
-        if v4_index < v4.len() {
-            out.push(v4[v4_index]);
-            v4_index += 1;
-            pushed = true;
-        }
-        if !pushed {
+        let (next_v6, next_v4) = (v6.next(), v4.next());
+        if next_v6.is_none() && next_v4.is_none() {
             break;
         }
+        out.extend(next_v6);
+        if out.len() < MAX_TCP_ADDRS {
+            out.extend(next_v4);
+        }
     }
-
-    Ok(out)
+    out
 }
 
 async fn tcp_connect_once(
@@ -314,16 +238,9 @@ async fn tcp_connect_once(
 fn spawn_tcp_attempt(
     join_set: &mut JoinSet<(SocketAddr, Result<u64, std::io::Error>)>,
     addr: SocketAddr,
-    packet_size: Option<u16>,
     deadline: tokio::time::Instant,
 ) {
-    join_set.spawn(async move {
-        let result = match packet_size {
-            Some(size) => super::tcp_syn::probe_once(addr, size, deadline).await,
-            None => tcp_connect_once(addr, deadline).await,
-        };
-        (addr, result)
-    });
+    join_set.spawn(async move { (addr, tcp_connect_once(addr, deadline).await) });
 }
 
 fn dual_stack_timeout_hint(
@@ -382,4 +299,25 @@ fn tcp_last_error(
     }
 
     object
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn interleave_starts_with_ipv6_and_caps_the_list() {
+        let v4 = |last: u8| IpAddr::from([192, 0, 2, last]);
+        let v6 = |last: u16| IpAddr::from([0x2001, 0xdb8, 0, 0, 0, 0, 0, last]);
+
+        assert_eq!(
+            interleave_families(vec![v4(1), v4(2), v6(1)]),
+            vec![v6(1), v4(1), v4(2)]
+        );
+
+        let many: Vec<IpAddr> = (1..=6).map(v4).chain((1..=6).map(v6)).collect();
+        let ordered = interleave_families(many);
+        assert_eq!(ordered.len(), MAX_TCP_ADDRS);
+        assert_eq!(ordered[..4], [v6(1), v4(1), v6(2), v4(2)]);
+    }
 }

@@ -13,11 +13,7 @@ import { MessageType, encodeEnvelope, encodeError, parseHelloBody } from "../pro
 import { sha256Hex } from "../util/hash";
 import { resolveAgentIpFamilies, selectAgentGeoIp } from "../util/ip";
 import { safeJsonStringify } from "../util/lang";
-import {
-  capabilitySupportsTracerouteIcmpIpv6,
-  capabilitySupportsTracerouteTcpSizePair,
-  capabilitySupportsTcpPacketSize,
-} from "../util/probe-capabilities";
+import { supportedProbeCapabilities } from "../util/probe-capabilities";
 import { resolveAndPublishAgentGeo } from "./geo";
 import type { AgentWsData } from "./hub";
 import { normalizeOptionalString, sendAndClose } from "./util";
@@ -112,9 +108,7 @@ async function handleHelloInner(
 
   const inventoryPack = hello.inv !== undefined ? Buffer.from(encode(hello.inv)) : undefined;
   const capabilitiesJson = safeJsonStringify(hello.cap) ?? null;
-  ws.data.supportsTracerouteTcpSizePair = capabilitySupportsTracerouteTcpSizePair(hello.cap);
-  ws.data.supportsTracerouteIcmpIpv6 = capabilitySupportsTracerouteIcmpIpv6(hello.cap);
-  ws.data.supportsTcpPacketSize = capabilitySupportsTcpPacketSize(hello.cap);
+  ws.data.probeCapabilities = supportedProbeCapabilities(hello.cap);
   const resolvedIps = resolveAgentIpFamilies({
     reportedIpv4: hello.ip4 ?? null,
     reportedIpv6: hello.ip6 ?? null,

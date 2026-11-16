@@ -136,8 +136,8 @@ describe("handleHello defers registry update until DB commit succeeds", () => {
         {
           ...deps,
           pushProbeConfig: async () => {
-            expect(ws.data.supportsTcpPacketSize).toBe(supported);
-            expect(ws.data.supportsTracerouteIcmpIpv6).toBe(supported);
+            expect(ws.data.probeCapabilities?.has("tcpPacketSize")).toBe(supported);
+            expect(ws.data.probeCapabilities?.has("tracerouteIcmpIpv6")).toBe(supported);
             pushed = true;
             return true;
           },
@@ -145,7 +145,9 @@ describe("handleHello defers registry update until DB commit succeeds", () => {
       );
       await waitForBackgroundTasks();
       expect(pushed).toBe(true);
-      expect(registry.listOptionRefs()[0]?.tcpPacketSizeSupported).toBe(supported);
+      expect(registry.listOptionRefs()[0]?.probeCapabilities.includes("tcpPacketSize")).toBe(
+        supported,
+      );
     }
   });
 

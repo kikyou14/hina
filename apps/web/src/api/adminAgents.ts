@@ -1,3 +1,4 @@
+import type { ProbeCapability } from "./adminProbes";
 import type { AdminAgentSystem, AgentInventory } from "./agentInfo";
 import { fetchJson } from "./http";
 
@@ -68,7 +69,7 @@ export type AdminAgentOption = {
   name: string;
   group: string | null;
   groupId: string | null;
-  tcpPacketSizeSupported: boolean;
+  probeCapabilities: ProbeCapability[];
 };
 
 export async function getAdminAgents(

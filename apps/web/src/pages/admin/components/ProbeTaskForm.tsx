@@ -18,20 +18,24 @@ import {
 import { Switch } from "@/components/ui/switch";
 import { getUserErrorMessage } from "@/lib/userErrors";
 import {
-  isIpv6Literal,
+  type FamilyChoice,
+  familyConflictsWithHost,
+  familyOfTarget,
   isTcpTracerouteTarget,
   isValidHost,
   isValidHttpUrl,
   isValidPort,
-  isValidTracerouteTcpPacketSize,
+  isValidTcpPacketSize,
   parseIntegerInput,
   parseTracerouteTcpPacketSizes,
-  TRACEROUTE_TCP_PACKET_SIZE_MAX,
-  TRACEROUTE_TCP_PACKET_SIZE_MIN,
+  probeCapabilitySupport,
+  rawTcpFamily,
+  requiredProbeCapabilities,
+  TCP_PACKET_SIZE_MAX,
+  TCP_PACKET_SIZE_MIN,
   tracerouteProtocolOfTarget,
   tcpPacketSizeOfTarget,
-  tcpPacketSizeSupport,
-  type TcpPacketSize,
+  withFamily,
   type ProbeTaskFormValue,
   type TracerouteProtocol,
 } from "../lib/probeValidation";
@@ -43,14 +47,19 @@ type ProbeFormField =
   | "url"
   | "host"
   | "port"
+  | "tcpPacketSize"
   | "smallSize"
   | "largeSize";
 type ProbeFormError = { text: string; field: ProbeFormField | null };
+
+/** `connect` completes a handshake through the OS; `syn` sends raw SYNs of an exact size. */
+type TcpMode = "connect" | "syn";
 
 const TARGET_FORM_FIELDS: readonly ProbeFormField[] = [
   "url",
   "host",
   "port",
+  "tcpPacketSize",
   "smallSize",
   "largeSize",
 ];
@@ -59,6 +68,36 @@ const TCP_TRACEROUTE_ONLY_FIELDS: readonly ProbeFormField[] = ["port", "smallSiz
 const DEFAULT_TCP_TRACEROUTE_PORT = "443";
 const DEFAULT_SMALL_PACKET_SIZE = "64";
 const DEFAULT_LARGE_PACKET_SIZE = "1400";
+const DEFAULT_TCP_PACKET_SIZE = 1400;
+/** 1280 is the IPv6 minimum MTU, so it must always pass; larger sizes expose MTU problems. */
+const TCP_PACKET_SIZE_PRESETS = [1280, 1400, 1500];
+
+function FamilySelect(props: {
+  value: FamilyChoice;
+  onChange: (value: FamilyChoice) => void;
+  disabled: boolean;
+}) {
+  const { t } = useTranslation();
+  return (
+    <div className="grid min-w-0 gap-1.5">
+      <SectionLabel>{t("probes.form.family")}</SectionLabel>
+      <Select
+        value={props.value}
+        disabled={props.disabled}
+        onValueChange={(v) => props.onChange(v as FamilyChoice)}
+      >
+        <SelectTrigger className="w-full" aria-label={t("probes.form.family")}>
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="auto">{t("probes.form.familyAuto")}</SelectItem>
+          <SelectItem value="ipv4">{t("probes.form.familyIpv4")}</SelectItem>
+          <SelectItem value="ipv6">{t("probes.form.familyIpv6")}</SelectItem>
+        </SelectContent>
+      </Select>
+    </div>
+  );
+}
 
 function initScopeFromTask(task: AdminProbeTask | null): ScopeState {
   if (!task) return { mode: "specific", groupIds: [], agentIds: [] };
@@ -98,9 +137,14 @@ export function ProbeTaskForm(props: {
   const initialPort = initialTarget && "port" in initialTarget ? String(initialTarget.port) : "";
   const initialUrl = initialTarget && "url" in initialTarget ? String(initialTarget.url) : "";
   const initialTcpTraceroute = isTcpTracerouteTarget(initialTarget) ? initialTarget : null;
+  const initialTcpPacketSize = tcpPacketSizeOfTarget(initialTarget);
 
-  const [tcpPacketSize, setTcpPacketSize] = React.useState<TcpPacketSize | undefined>(() =>
-    tcpPacketSizeOfTarget(initialTarget),
+  const [family, setFamily] = React.useState<FamilyChoice>(() => familyOfTarget(initialTarget));
+  const [tcpMode, setTcpMode] = React.useState<TcpMode>(
+    initialTcpPacketSize === null ? "connect" : "syn",
+  );
+  const [tcpPacketSize, setTcpPacketSize] = React.useState(
+    String(initialTcpPacketSize ?? DEFAULT_TCP_PACKET_SIZE),
   );
 
   const [host, setHost] = React.useState(initialHost);
@@ -121,7 +165,9 @@ export function ProbeTaskForm(props: {
 
   const [scope, setScope] = React.useState<ScopeState>(() => initScopeFromTask(tsk));
 
-  const packetSizeSupport = tcpPacketSizeSupport(props.agents, scope);
+  const synSupport = probeCapabilitySupport(props.agents, scope, ["tcpPacketSize"]);
+  const sizeFamily = rawTcpFamily(host, family);
+  const minPacketSize = TCP_PACKET_SIZE_MIN[sizeFamily];
 
   const [error, setError] = React.useState<ProbeFormError | null>(null);
 
@@ -135,37 +181,49 @@ export function ProbeTaskForm(props: {
     if (kind === "http") {
       return url.trim() ? { url: url.trim() } : null;
     }
+    const trimmedHost = host.trim();
+    if (!trimmedHost) return null;
     if (kind === "tcp") {
       const p = parseIntegerInput(port);
-      if (!host.trim() || p === null) return null;
-      return {
-        host: host.trim(),
-        port: p,
-        ...(tcpPacketSize === undefined ? {} : { packetSize: tcpPacketSize }),
-      };
+      if (p === null) return null;
+      if (tcpMode === "connect") return withFamily({ host: trimmedHost, port: p }, family);
+      const size = parseIntegerInput(tcpPacketSize);
+      if (size === null) return null;
+      return withFamily({ host: trimmedHost, port: p, packetSize: size }, family);
     }
     if (kind === "traceroute" && tracerouteProtocol === "tcp") {
-      if (!host.trim()) return null;
       const p = parseIntegerInput(tracerouteTcpPort);
       const small = parseIntegerInput(smallSize);
       const large = parseIntegerInput(largeSize);
       if (p === null || small === null || large === null) return null;
-      const packetSizes = parseTracerouteTcpPacketSizes(small, large);
+      const packetSizes = parseTracerouteTcpPacketSizes(
+        small,
+        large,
+        rawTcpFamily(trimmedHost, family),
+      );
       if (!packetSizes) return null;
-      return { host: host.trim(), protocol: "tcp", port: p, packetSizes };
+      return withFamily(
+        { host: trimmedHost, protocol: "tcp" as const, port: p, packetSizes },
+        family,
+      );
     }
-    return host.trim() ? { host: host.trim() } : null;
+    return withFamily({ host: trimmedHost }, family);
   }, [
     kind,
     host,
     port,
     url,
+    family,
+    tcpMode,
     tcpPacketSize,
     tracerouteProtocol,
     tracerouteTcpPort,
     smallSize,
     largeSize,
   ]);
+
+  const requiredCapabilities = requiredProbeCapabilities(kind, target);
+  const capabilitySupport = probeCapabilitySupport(props.agents, scope, requiredCapabilities);
 
   const scopeValid =
     scope.mode === "all" ||
@@ -204,32 +262,8 @@ export function ProbeTaskForm(props: {
               return;
             }
             validTarget = { url: trimmedUrl };
-          } else if (kind === "tcp") {
-            const trimmedHost = host.trim();
-            if (!trimmedHost) {
-              setError({ text: t("probes.form.missingTarget"), field: "host" });
-              return;
-            }
-            if (!isValidHost(trimmedHost)) {
-              setError({ text: t("probes.form.invalidHost"), field: "host" });
-              return;
-            }
-            const p = parseIntegerInput(port);
-            if (p === null || p < 1 || p > 65535) {
-              setError({ text: t("probes.form.invalidPort"), field: "port" });
-              return;
-            }
-            if (tcpPacketSize !== undefined && isIpv6Literal(trimmedHost)) {
-              setError({ text: t("probes.form.tcpPacketSizeIpv4Only"), field: "host" });
-              return;
-            }
-            validTarget = {
-              host: trimmedHost,
-              port: p,
-              ...(tcpPacketSize === undefined ? {} : { packetSize: tcpPacketSize }),
-            };
           } else {
-            // icmp / traceroute
+            // icmp / tcp / traceroute
             const trimmedHost = host.trim();
             if (!trimmedHost) {
               setError({ text: t("probes.form.missingTarget"), field: "host" });
@@ -239,34 +273,58 @@ export function ProbeTaskForm(props: {
               setError({ text: t("probes.form.invalidHost"), field: "host" });
               return;
             }
-            if (kind === "traceroute" && tracerouteProtocol === "tcp") {
-              if (isIpv6Literal(trimmedHost)) {
-                setError({ text: t("probes.form.tracerouteTcpIpv4Only"), field: "host" });
+            if (familyConflictsWithHost(trimmedHost, family)) {
+              setError({ text: t("probes.form.familyConflict"), field: "host" });
+              return;
+            }
+            const rawFamily = rawTcpFamily(trimmedHost, family);
+            const invalidPacketSize = t("probes.form.invalidPacketSize", {
+              min: TCP_PACKET_SIZE_MIN[rawFamily],
+              max: TCP_PACKET_SIZE_MAX,
+            });
+            if (kind === "tcp") {
+              const p = parseIntegerInput(port);
+              if (p === null || !isValidPort(p)) {
+                setError({ text: t("probes.form.invalidPort"), field: "port" });
                 return;
               }
+              if (tcpMode === "connect") {
+                validTarget = withFamily({ host: trimmedHost, port: p }, family);
+              } else {
+                const size = parseIntegerInput(tcpPacketSize);
+                if (size === null || !isValidTcpPacketSize(size, rawFamily)) {
+                  setError({ text: invalidPacketSize, field: "tcpPacketSize" });
+                  return;
+                }
+                validTarget = withFamily({ host: trimmedHost, port: p, packetSize: size }, family);
+              }
+            } else if (kind === "traceroute" && tracerouteProtocol === "tcp") {
               const p = parseIntegerInput(tracerouteTcpPort);
               if (p === null || !isValidPort(p)) {
                 setError({ text: t("probes.form.invalidPort"), field: "port" });
                 return;
               }
               const small = parseIntegerInput(smallSize);
-              if (small === null || !isValidTracerouteTcpPacketSize(small)) {
-                setError({ text: t("probes.form.invalidPacketSize"), field: "smallSize" });
+              if (small === null || !isValidTcpPacketSize(small, rawFamily)) {
+                setError({ text: invalidPacketSize, field: "smallSize" });
                 return;
               }
               const large = parseIntegerInput(largeSize);
-              if (large === null || !isValidTracerouteTcpPacketSize(large)) {
-                setError({ text: t("probes.form.invalidPacketSize"), field: "largeSize" });
+              if (large === null || !isValidTcpPacketSize(large, rawFamily)) {
+                setError({ text: invalidPacketSize, field: "largeSize" });
                 return;
               }
-              const packetSizes = parseTracerouteTcpPacketSizes(small, large);
+              const packetSizes = parseTracerouteTcpPacketSizes(small, large, rawFamily);
               if (!packetSizes) {
                 setError({ text: t("probes.form.duplicatePacketSizes"), field: "largeSize" });
                 return;
               }
-              validTarget = { host: trimmedHost, protocol: "tcp", port: p, packetSizes };
+              validTarget = withFamily(
+                { host: trimmedHost, protocol: "tcp" as const, port: p, packetSizes },
+                family,
+              );
             } else {
-              validTarget = { host: trimmedHost };
+              validTarget = withFamily({ host: trimmedHost }, family);
             }
           }
 
@@ -409,101 +467,141 @@ export function ProbeTaskForm(props: {
               aria-invalid={error?.field === "url"}
             />
           </div>
-        ) : kind === "tcp" ? (
-          <div className="grid grid-cols-2 gap-3">
-            <div className="grid gap-1.5">
-              <SectionLabel>{t("probes.form.host")}</SectionLabel>
-              <Input
-                value={host}
-                onChange={(e) => {
-                  setHost(e.target.value);
-                  if (error?.field === "host") setError(null);
-                }}
-                disabled={props.pending}
-                placeholder="1.1.1.1"
-                aria-invalid={error?.field === "host"}
-              />
-            </div>
-            <div className="grid gap-1.5">
-              <SectionLabel>{t("probes.form.port")}</SectionLabel>
-              <Input
-                type="number"
-                min={1}
-                max={65535}
-                value={port}
-                onChange={(e) => {
-                  setPort(e.target.value);
-                  if (error?.field === "port") setError(null);
-                }}
-                disabled={props.pending}
-                placeholder="443"
-                aria-invalid={error?.field === "port"}
-              />
-            </div>
-            <div className="col-span-2 grid gap-1.5">
-              <SectionLabel>{t("probes.form.tcpPacketSize")}</SectionLabel>
-              <Select
-                value={tcpPacketSize === undefined ? "connect" : String(tcpPacketSize)}
-                disabled={props.pending}
-                onValueChange={(value) => {
-                  setTcpPacketSize(value === "40" ? 40 : value === "1200" ? 1200 : undefined);
-                  clearErrorForFields(["host"]);
-                }}
-              >
-                <SelectTrigger className="w-full" aria-label={t("probes.form.tcpPacketSize")}>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="connect">{t("probes.form.tcpSystemConnect")}</SelectItem>
-                  <SelectItem value="40" disabled={packetSizeSupport.supported === 0}>
-                    {t("probes.form.tcpSmallPacket")}
-                  </SelectItem>
-                  <SelectItem value="1200" disabled={packetSizeSupport.supported === 0}>
-                    {t("probes.form.tcpLargePacket")}
-                  </SelectItem>
-                </SelectContent>
-              </Select>
-              <p className="text-muted-foreground text-xs">{t("probes.form.tcpPacketSizeHint")}</p>
-              <p className="text-muted-foreground text-xs" role="status">
-                {t("probes.form.tcpPacketSizeSupport", packetSizeSupport)}
-              </p>
-            </div>
-          </div>
-        ) : kind === "traceroute" ? (
+        ) : (
           <div className="grid gap-3">
-            <div className="grid min-w-0 gap-1.5">
-              <SectionLabel>{t("probes.form.tracerouteProtocol")}</SectionLabel>
-              <Select
-                value={tracerouteProtocol}
-                onValueChange={(v) => {
-                  const nextProtocol = v as TracerouteProtocol;
-                  setTracerouteProtocol(nextProtocol);
-                  if (nextProtocol === "icmp") clearErrorForFields(TCP_TRACEROUTE_ONLY_FIELDS);
-                }}
-              >
-                <SelectTrigger className="w-full">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="icmp">{t("probes.form.tracerouteProtocolIcmp")}</SelectItem>
-                  <SelectItem value="tcp">{t("probes.form.tracerouteProtocolTcp")}</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="grid gap-1.5">
-              <SectionLabel>{t("probes.form.host")}</SectionLabel>
-              <Input
-                value={host}
-                onChange={(e) => {
-                  setHost(e.target.value);
-                  if (error?.field === "host") setError(null);
-                }}
+            {kind === "traceroute" ? (
+              <div className="grid min-w-0 gap-1.5">
+                <SectionLabel>{t("probes.form.tracerouteProtocol")}</SectionLabel>
+                <Select
+                  value={tracerouteProtocol}
+                  onValueChange={(v) => {
+                    const nextProtocol = v as TracerouteProtocol;
+                    setTracerouteProtocol(nextProtocol);
+                    if (nextProtocol === "icmp") clearErrorForFields(TCP_TRACEROUTE_ONLY_FIELDS);
+                  }}
+                >
+                  <SelectTrigger className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="icmp">{t("probes.form.tracerouteProtocolIcmp")}</SelectItem>
+                    <SelectItem value="tcp">{t("probes.form.tracerouteProtocolTcp")}</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            ) : null}
+            <div className="grid grid-cols-2 gap-3">
+              <div className="grid min-w-0 gap-1.5">
+                <SectionLabel>{t("probes.form.host")}</SectionLabel>
+                <Input
+                  value={host}
+                  onChange={(e) => {
+                    setHost(e.target.value);
+                    if (error?.field === "host") setError(null);
+                  }}
+                  disabled={props.pending}
+                  placeholder="1.1.1.1"
+                  aria-invalid={error?.field === "host"}
+                />
+              </div>
+              <FamilySelect
+                value={family}
                 disabled={props.pending}
-                placeholder="1.1.1.1"
-                aria-invalid={error?.field === "host"}
+                onChange={(next) => {
+                  setFamily(next);
+                  clearErrorForFields(["host", "tcpPacketSize", "smallSize", "largeSize"]);
+                }}
               />
             </div>
-            {tracerouteProtocol === "tcp" ? (
+            {family === "auto" ? (
+              <p className="text-muted-foreground text-xs">{t("probes.form.familyAutoHint")}</p>
+            ) : null}
+            {kind === "tcp" ? (
+              <>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="grid min-w-0 gap-1.5">
+                    <SectionLabel>{t("probes.form.port")}</SectionLabel>
+                    <Input
+                      type="number"
+                      min={1}
+                      max={65535}
+                      value={port}
+                      onChange={(e) => {
+                        setPort(e.target.value);
+                        if (error?.field === "port") setError(null);
+                      }}
+                      disabled={props.pending}
+                      placeholder="443"
+                      aria-invalid={error?.field === "port"}
+                    />
+                  </div>
+                  <div className="grid min-w-0 gap-1.5">
+                    <SectionLabel>{t("probes.form.tcpMode")}</SectionLabel>
+                    <Select
+                      value={tcpMode}
+                      disabled={props.pending}
+                      onValueChange={(v) => {
+                        setTcpMode(v as TcpMode);
+                        clearErrorForFields(["tcpPacketSize"]);
+                      }}
+                    >
+                      <SelectTrigger className="w-full" aria-label={t("probes.form.tcpMode")}>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="connect">{t("probes.form.tcpSystemConnect")}</SelectItem>
+                        <SelectItem
+                          value="syn"
+                          disabled={synSupport.supported === 0 && tcpMode !== "syn"}
+                        >
+                          {t("probes.form.tcpSynMode")}
+                        </SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+                {tcpMode === "syn" ? (
+                  <div className="grid gap-1.5">
+                    <SectionLabel>{t("probes.form.tcpPacketSizeBytes")}</SectionLabel>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Input
+                        type="number"
+                        className="w-28"
+                        min={minPacketSize}
+                        max={TCP_PACKET_SIZE_MAX}
+                        value={tcpPacketSize}
+                        onChange={(e) => {
+                          setTcpPacketSize(e.target.value);
+                          if (error?.field === "tcpPacketSize") setError(null);
+                        }}
+                        disabled={props.pending}
+                        aria-label={t("probes.form.tcpPacketSizeBytes")}
+                        aria-invalid={error?.field === "tcpPacketSize"}
+                      />
+                      {[minPacketSize, ...TCP_PACKET_SIZE_PRESETS].map((size) => (
+                        <Button
+                          key={size}
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          disabled={props.pending}
+                          onClick={() => {
+                            setTcpPacketSize(String(size));
+                            if (error?.field === "tcpPacketSize") setError(null);
+                          }}
+                        >
+                          {size === minPacketSize
+                            ? t("probes.form.packetSizeMinPreset", { size })
+                            : size}
+                        </Button>
+                      ))}
+                    </div>
+                    <p className="text-muted-foreground text-xs">{t("probes.form.tcpSynHint")}</p>
+                  </div>
+                ) : null}
+              </>
+            ) : null}
+            {kind === "traceroute" && tracerouteProtocol === "tcp" ? (
               <>
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
                   <div className="grid gap-1.5">
@@ -526,8 +624,8 @@ export function ProbeTaskForm(props: {
                     <SectionLabel>{t("probes.form.tracerouteSmallSize")}</SectionLabel>
                     <Input
                       type="number"
-                      min={TRACEROUTE_TCP_PACKET_SIZE_MIN}
-                      max={TRACEROUTE_TCP_PACKET_SIZE_MAX}
+                      min={minPacketSize}
+                      max={TCP_PACKET_SIZE_MAX}
                       value={smallSize}
                       onChange={(e) => {
                         setSmallSize(e.target.value);
@@ -542,8 +640,8 @@ export function ProbeTaskForm(props: {
                     <SectionLabel>{t("probes.form.tracerouteLargeSize")}</SectionLabel>
                     <Input
                       type="number"
-                      min={TRACEROUTE_TCP_PACKET_SIZE_MIN}
-                      max={TRACEROUTE_TCP_PACKET_SIZE_MAX}
+                      min={minPacketSize}
+                      max={TCP_PACKET_SIZE_MAX}
                       value={largeSize}
                       onChange={(e) => {
                         setLargeSize(e.target.value);
@@ -560,20 +658,11 @@ export function ProbeTaskForm(props: {
                 </p>
               </>
             ) : null}
-          </div>
-        ) : (
-          <div className="grid gap-1.5">
-            <SectionLabel>{t("probes.form.host")}</SectionLabel>
-            <Input
-              value={host}
-              onChange={(e) => {
-                setHost(e.target.value);
-                if (error?.field === "host") setError(null);
-              }}
-              disabled={props.pending}
-              placeholder="1.1.1.1"
-              aria-invalid={error?.field === "host"}
-            />
+            {requiredCapabilities.length > 0 ? (
+              <p className="text-muted-foreground text-xs" role="status">
+                {t("probes.form.capabilitySupport", capabilitySupport)}
+              </p>
+            ) : null}
           </div>
         )}
       </div>

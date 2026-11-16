@@ -21,6 +21,7 @@ import {
 import type { RuntimeAgentConfigStore } from "../settings/runtime";
 import { ActivityGate } from "../util/activity-gate";
 import { resolveAgentIpFamilies, selectAgentGeoIp } from "../util/ip";
+import type { ProbeCapability } from "../util/probe-capabilities";
 import { resolveClientIp } from "../util/trust-proxy";
 import { FlushBuffer } from "./flush-buffer";
 import { resolveAndPublishAgentGeo } from "./geo";
@@ -60,9 +61,7 @@ export type AgentWsData = {
   agentId?: string;
   probeTaskIds?: Set<string>;
   tracerouteTaskIds?: Set<string>;
-  supportsTracerouteTcpSizePair?: boolean;
-  supportsTracerouteIcmpIpv6?: boolean;
-  supportsTcpPacketSize?: boolean;
+  probeCapabilities?: Set<ProbeCapability>;
   authed: boolean;
   rateLimit: RateLimitState;
   helloTimer?: ReturnType<typeof setTimeout>;
@@ -223,9 +222,7 @@ export function createWsHub(deps: {
         allAgentTasks: options.allAgentTasks,
         scope,
         rev: nextProbeConfigRev(),
-        supportsTracerouteTcpSizePair: ws.data.supportsTracerouteTcpSizePair,
-        supportsTracerouteIcmpIpv6: ws.data.supportsTracerouteIcmpIpv6,
-        supportsTcpPacketSize: ws.data.supportsTcpPacketSize,
+        capabilities: ws.data.probeCapabilities,
       });
       ws.data.probeTaskIds = new Set(body.tasks.map((t) => t.id));
       ws.data.tracerouteTaskIds = new Set(

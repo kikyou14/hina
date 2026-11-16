@@ -1,51 +1,23 @@
-import { isIP } from "node:net";
 import { eq, inArray } from "drizzle-orm";
 import type { DbClient } from "../db/client";
 import { agent, agentStatus, probeTask, probeTaskAgent, probeTaskGroup } from "../db/schema";
 import type { ProbeConfigBody, ProbeTaskKind, ProbeTaskWire } from "../protocol/envelope";
-import { isRecord, safeJsonParse } from "../util/lang";
-
+import { safeJsonParse } from "../util/lang";
 import {
-  capabilitySupportsTcpPacketSize,
-  capabilitySupportsTracerouteIcmpIpv6,
-  capabilitySupportsTracerouteTcpSizePair,
+  type ProbeCapability,
+  requiredProbeCapabilities,
+  supportedProbeCapabilities,
 } from "../util/probe-capabilities";
 
 function isProbeKind(value: string): value is ProbeTaskKind {
   return value === "icmp" || value === "tcp" || value === "http" || value === "traceroute";
 }
 
-function isTracerouteTcpSizePairTarget(target: unknown): boolean {
-  return isRecord(target) && target["protocol"] === "tcp";
-}
-
-function isTracerouteIpv6Target(target: unknown): boolean {
-  return isRecord(target) && typeof target["host"] === "string" && isIP(target["host"]) === 6;
-}
-
-function isTcpPacketSizeTarget(target: unknown): boolean {
-  return isRecord(target) && target["packetSize"] !== undefined;
-}
-
-/** Agent capability a task needs beyond the baseline probes; agents without it skip the task. */
-export type ProbeCapability = "tracerouteTcpSizePair" | "tracerouteIcmpIpv6" | "tcpPacketSize";
-
-export function requiredProbeCapability(kind: string, target: unknown): ProbeCapability | null {
-  if (kind === "traceroute") {
-    if (isTracerouteTcpSizePairTarget(target)) return "tracerouteTcpSizePair";
-    if (isTracerouteIpv6Target(target)) return "tracerouteIcmpIpv6";
-    return null;
-  }
-  if (kind === "tcp" && isTcpPacketSizeTarget(target)) return "tcpPacketSize";
-  return null;
-}
-
-function capabilitySupport(cap: unknown): Record<ProbeCapability, boolean> {
-  return {
-    tracerouteTcpSizePair: capabilitySupportsTracerouteTcpSizePair(cap),
-    tracerouteIcmpIpv6: capabilitySupportsTracerouteIcmpIpv6(cap),
-    tcpPacketSize: capabilitySupportsTcpPacketSize(cap),
-  };
+function supportsAll(
+  supported: ReadonlySet<ProbeCapability>,
+  required: readonly ProbeCapability[],
+): boolean {
+  return required.every((capability) => supported.has(capability));
 }
 
 type TaskRow = {
@@ -111,9 +83,8 @@ export type BuildProbeConfigOptions = {
   allAgentTasks?: TaskRow[];
   scope: AgentProbeScope;
   rev: number;
-  supportsTracerouteTcpSizePair?: boolean;
-  supportsTracerouteIcmpIpv6?: boolean;
-  supportsTcpPacketSize?: boolean;
+  /** What the agent advertised in HELLO; tasks needing anything else are withheld. */
+  capabilities?: ReadonlySet<ProbeCapability>;
 };
 
 export async function buildProbeConfigForAgent(
@@ -122,11 +93,7 @@ export async function buildProbeConfigForAgent(
   options: BuildProbeConfigOptions,
 ): Promise<ProbeConfigBody> {
   const tasksById = new Map<string, TaskRow>();
-  const supported: Record<ProbeCapability, boolean> = {
-    tracerouteTcpSizePair: options.supportsTracerouteTcpSizePair ?? false,
-    tracerouteIcmpIpv6: options.supportsTracerouteIcmpIpv6 ?? false,
-    tcpPacketSize: options.supportsTcpPacketSize ?? false,
-  };
+  const supported = options.capabilities ?? new Set<ProbeCapability>();
 
   const allAgentRows = options.allAgentTasks ?? (await fetchAllAgentTasks(db));
 
@@ -166,8 +133,7 @@ export async function buildProbeConfigForAgent(
     const tar = safeJsonParse(r.targetJson);
     if (tar === null) continue;
 
-    const required = requiredProbeCapability(r.kind, tar);
-    if (required && !supported[required]) continue;
+    if (!supportsAll(supported, requiredProbeCapabilities(r.kind, tar))) continue;
 
     tasks.push({
       id: r.id,
@@ -201,8 +167,8 @@ export async function computeProbeSupportCounts(
   const result = new Map<string, ProbeSupport>();
 
   const gatedTasks = tasks.flatMap((t) => {
-    const required = requiredProbeCapability(t.kind, safeJsonParse(t.targetJson));
-    return required ? [{ ...t, required }] : [];
+    const required = requiredProbeCapabilities(t.kind, safeJsonParse(t.targetJson));
+    return required.length > 0 ? [{ ...t, required }] : [];
   });
   if (gatedTasks.length === 0) return result;
 
@@ -215,11 +181,11 @@ export async function computeProbeSupportCounts(
     .from(agent)
     .leftJoin(agentStatus, eq(agentStatus.agentId, agent.id));
 
-  const supportById = new Map<string, Record<ProbeCapability, boolean>>();
+  const supportById = new Map<string, Set<ProbeCapability>>();
   const agentIdsByGroup = new Map<string, string[]>();
   for (const row of agentRows) {
     const cap = row.capabilitiesJson ? safeJsonParse(row.capabilitiesJson) : null;
-    supportById.set(row.id, capabilitySupport(cap));
+    supportById.set(row.id, supportedProbeCapabilities(cap));
     if (row.groupId) {
       const list = agentIdsByGroup.get(row.groupId) ?? [];
       list.push(row.id);
@@ -266,7 +232,7 @@ export async function computeProbeSupportCounts(
 
     let unsupportedAgents = 0;
     for (const id of targetIds) {
-      if (!supportById.get(id)?.[task.required]) unsupportedAgents += 1;
+      if (!supportsAll(supportById.get(id) ?? new Set(), task.required)) unsupportedAgents += 1;
     }
     result.set(task.id, { targetAgents: targetIds.size, unsupportedAgents });
   }

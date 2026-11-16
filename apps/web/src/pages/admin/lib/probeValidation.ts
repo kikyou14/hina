@@ -1,5 +1,5 @@
 import type { AdminAgentOption } from "@/api/adminAgents";
-import type { ProbeKind, ProbeTaskTarget } from "@/api/adminProbes";
+import type { AddressFamily, ProbeCapability, ProbeKind, ProbeTaskTarget } from "@/api/adminProbes";
 import type { ScopeState } from "@/components/ScopeSelector";
 
 export const SELECT_ALL_VALUE = "__all__";
@@ -15,13 +15,44 @@ export function isIpv6Literal(value: string): boolean {
   return unwrapped.includes(":") && !unwrapped.includes("/");
 }
 
+export function isIpv4Literal(value: string): boolean {
+  const m = IPV4_RE.exec(value.trim());
+  return m !== null && m.slice(1).every((p) => Number(p) <= 255);
+}
+
 export function isValidHost(value: string): boolean {
   const s = value.trim();
   if (!s) return false;
   if (s.includes(":")) return true;
-  const m = IPV4_RE.exec(s);
-  if (m) return m.slice(1).every((p) => Number(p) <= 255);
+  if (IPV4_RE.test(s)) return isIpv4Literal(s);
   return HOSTNAME_RE.test(s);
+}
+
+/** `auto` leaves the address family to the agent. */
+export type FamilyChoice = "auto" | AddressFamily;
+
+export function familyOfTarget(target: ProbeTaskTarget | null | undefined): FamilyChoice {
+  if (!target || !("family" in target)) return "auto";
+  return target.family === "ipv4" || target.family === "ipv6" ? target.family : "auto";
+}
+
+export function withFamily<T extends object>(
+  target: T,
+  family: FamilyChoice,
+): T & { family?: AddressFamily } {
+  return family === "auto" ? target : { ...target, family };
+}
+
+/** Whether an explicit family contradicts an IP literal host. */
+export function familyConflictsWithHost(host: string, family: FamilyChoice): boolean {
+  if (family === "auto") return false;
+  return family === "ipv4" ? isIpv6Literal(host) : isIpv4Literal(host);
+}
+
+/** Family a raw TCP probe sends over: the chosen one, else an IPv6 literal's, else IPv4. */
+export function rawTcpFamily(host: string, family: FamilyChoice): AddressFamily {
+  if (family !== "auto") return family;
+  return isIpv6Literal(host) ? "ipv6" : "ipv4";
 }
 
 export function isValidHttpUrl(value: string): boolean {
@@ -50,6 +81,7 @@ export type TracerouteProtocol = "icmp" | "tcp";
 
 export type TcpTracerouteTarget = {
   host: string;
+  family?: AddressFamily;
   protocol: "tcp";
   port: number;
   packetSizes: [number, number];
@@ -80,38 +112,68 @@ export function isValidPort(value: number): boolean {
   return Number.isInteger(value) && value >= 1 && value <= 65535;
 }
 
-export const TRACEROUTE_TCP_PACKET_SIZE_MIN = 40;
-export const TRACEROUTE_TCP_PACKET_SIZE_MAX = 1500;
+/** Smallest raw TCP probe: the fixed IP header plus a bare 20-byte TCP header. */
+export const TCP_PACKET_SIZE_MIN: Record<AddressFamily, number> = { ipv4: 40, ipv6: 60 };
+export const TCP_PACKET_SIZE_MAX = 1500;
 
-export function isValidTracerouteTcpPacketSize(value: number): boolean {
+export function isValidTcpPacketSize(value: number, family: AddressFamily): boolean {
   return (
-    Number.isInteger(value) &&
-    value >= TRACEROUTE_TCP_PACKET_SIZE_MIN &&
-    value <= TRACEROUTE_TCP_PACKET_SIZE_MAX
+    Number.isInteger(value) && value >= TCP_PACKET_SIZE_MIN[family] && value <= TCP_PACKET_SIZE_MAX
   );
 }
 
 export function parseTracerouteTcpPacketSizes(
   small: number,
   large: number,
+  family: AddressFamily,
 ): [number, number] | null {
-  if (!isValidTracerouteTcpPacketSize(small) || !isValidTracerouteTcpPacketSize(large)) {
+  if (!isValidTcpPacketSize(small, family) || !isValidTcpPacketSize(large, family)) {
     return null;
   }
   if (small === large) return null;
   return small < large ? [small, large] : [large, small];
 }
 
-export type TcpPacketSize = 40 | 1200;
-
-export function tcpPacketSizeOfTarget(
-  target: ProbeTaskTarget | null | undefined,
-): TcpPacketSize | undefined {
-  if (!target || !("packetSize" in target)) return undefined;
-  return target.packetSize === 40 || target.packetSize === 1200 ? target.packetSize : undefined;
+export function tcpPacketSizeOfTarget(target: ProbeTaskTarget | null | undefined): number | null {
+  if (!target || !("packetSize" in target)) return null;
+  return typeof target.packetSize === "number" ? target.packetSize : null;
 }
 
-export function tcpPacketSizeSupport(agents: AdminAgentOption[], scope: ScopeState) {
+/** The only TCP packet sizes agents accepted before arbitrary sizes and IPv6. */
+const LEGACY_TCP_PACKET_SIZES: ReadonlySet<number> = new Set([40, 1200]);
+
+/** Mirrors the server's gating so the form can warn before saving; empty for baseline probes. */
+export function requiredProbeCapabilities(
+  kind: ProbeKind,
+  target: ProbeTaskTarget | null,
+): ProbeCapability[] {
+  if (!target || !("host" in target)) return [];
+  const required: ProbeCapability[] = [];
+  const family = familyOfTarget(target);
+  if (family !== "auto") required.push("addressFamily");
+
+  if (kind === "tcp" && "packetSize" in target && target.packetSize !== undefined) {
+    required.push("tcpPacketSize");
+    if (!LEGACY_TCP_PACKET_SIZES.has(target.packetSize)) required.push("tcpPacketSizeRange");
+    if (rawTcpFamily(target.host, family) === "ipv6") required.push("tcpPacketSizeIpv6");
+  } else if (kind === "traceroute" && isTcpTracerouteTarget(target)) {
+    required.push("tracerouteTcpSizePair");
+    if (rawTcpFamily(target.host, family) === "ipv6") required.push("tracerouteTcpSizePairIpv6");
+  } else if (
+    kind === "traceroute" &&
+    (family === "ipv6" || (family === "auto" && isIpv6Literal(target.host)))
+  ) {
+    required.push("tracerouteIcmpIpv6");
+  }
+  return required;
+}
+
+/** Agents in `scope`, and how many of them advertise every `required` capability. */
+export function probeCapabilitySupport(
+  agents: AdminAgentOption[],
+  scope: ScopeState,
+  required: readonly ProbeCapability[],
+) {
   const selected = agents.filter(
     (agent) =>
       scope.mode === "all" ||
@@ -121,6 +183,8 @@ export function tcpPacketSizeSupport(agents: AdminAgentOption[], scope: ScopeSta
   );
   return {
     total: selected.length,
-    supported: selected.filter((agent) => agent.tcpPacketSizeSupported).length,
+    supported: selected.filter((agent) =>
+      required.every((capability) => agent.probeCapabilities.includes(capability)),
+    ).length,
   };
 }

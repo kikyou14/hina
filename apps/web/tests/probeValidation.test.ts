@@ -1,16 +1,22 @@
 import { describe, expect, test } from "bun:test";
 
+import type { AdminAgentOption } from "../src/api/adminAgents";
 import {
-  tcpPacketSizeOfTarget,
-  tcpPacketSizeSupport,
+  familyConflictsWithHost,
+  familyOfTarget,
   isTcpTracerouteTarget,
   isValidPort,
-  isValidTracerouteTcpPacketSize,
+  isValidTcpPacketSize,
   parseIntegerInput,
   parseTracerouteTcpPacketSizes,
+  probeCapabilitySupport,
+  rawTcpFamily,
+  requiredProbeCapabilities,
+  tcpPacketSizeOfTarget,
+  TCP_PACKET_SIZE_MAX,
+  TCP_PACKET_SIZE_MIN,
   tracerouteProtocolOfTarget,
-  TRACEROUTE_TCP_PACKET_SIZE_MAX,
-  TRACEROUTE_TCP_PACKET_SIZE_MIN,
+  withFamily,
 } from "../src/pages/admin/lib/probeValidation";
 
 describe("parseIntegerInput", () => {
@@ -53,44 +59,50 @@ describe("isValidPort", () => {
   });
 });
 
-describe("isValidTracerouteTcpPacketSize", () => {
-  test("accepts the 40-1500 boundary", () => {
-    expect(isValidTracerouteTcpPacketSize(TRACEROUTE_TCP_PACKET_SIZE_MIN)).toBe(true);
-    expect(isValidTracerouteTcpPacketSize(TRACEROUTE_TCP_PACKET_SIZE_MAX)).toBe(true);
-    expect(isValidTracerouteTcpPacketSize(64)).toBe(true);
+describe("isValidTcpPacketSize", () => {
+  test("accepts a bare SYN up to 1500 bytes for each family", () => {
+    expect(isValidTcpPacketSize(TCP_PACKET_SIZE_MIN.ipv4, "ipv4")).toBe(true);
+    expect(isValidTcpPacketSize(TCP_PACKET_SIZE_MIN.ipv6, "ipv6")).toBe(true);
+    expect(isValidTcpPacketSize(TCP_PACKET_SIZE_MAX, "ipv6")).toBe(true);
+    expect(isValidTcpPacketSize(64, "ipv4")).toBe(true);
   });
 
-  test("rejects values outside 40-1500 or non-integers", () => {
-    expect(isValidTracerouteTcpPacketSize(39)).toBe(false);
-    expect(isValidTracerouteTcpPacketSize(1501)).toBe(false);
-    expect(isValidTracerouteTcpPacketSize(64.5)).toBe(false);
-    expect(isValidTracerouteTcpPacketSize(Number.NaN)).toBe(false);
+  test("rejects values outside the family's range or non-integers", () => {
+    expect(isValidTcpPacketSize(39, "ipv4")).toBe(false);
+    // 40 bytes cannot carry an IPv6 header and a TCP header.
+    expect(isValidTcpPacketSize(40, "ipv6")).toBe(false);
+    expect(isValidTcpPacketSize(59, "ipv6")).toBe(false);
+    expect(isValidTcpPacketSize(1501, "ipv4")).toBe(false);
+    expect(isValidTcpPacketSize(64.5, "ipv4")).toBe(false);
+    expect(isValidTcpPacketSize(Number.NaN, "ipv4")).toBe(false);
   });
 });
 
 describe("parseTracerouteTcpPacketSizes", () => {
   test("keeps an already-ascending pair", () => {
-    expect(parseTracerouteTcpPacketSizes(64, 1400)).toEqual([64, 1400]);
+    expect(parseTracerouteTcpPacketSizes(64, 1400, "ipv4")).toEqual([64, 1400]);
   });
 
   test("normalizes a descending pair to ascending order", () => {
-    expect(parseTracerouteTcpPacketSizes(1400, 64)).toEqual([64, 1400]);
+    expect(parseTracerouteTcpPacketSizes(1400, 64, "ipv4")).toEqual([64, 1400]);
   });
 
-  test("accepts the boundary values 40 and 1500", () => {
-    expect(parseTracerouteTcpPacketSizes(40, 1500)).toEqual([40, 1500]);
+  test("accepts each family's boundary values", () => {
+    expect(parseTracerouteTcpPacketSizes(40, 1500, "ipv4")).toEqual([40, 1500]);
+    expect(parseTracerouteTcpPacketSizes(1500, 60, "ipv6")).toEqual([60, 1500]);
   });
 
   test("rejects equal sizes", () => {
-    expect(parseTracerouteTcpPacketSizes(64, 64)).toBeNull();
+    expect(parseTracerouteTcpPacketSizes(64, 64, "ipv4")).toBeNull();
   });
 
-  test("rejects a size below the minimum", () => {
-    expect(parseTracerouteTcpPacketSizes(39, 1400)).toBeNull();
+  test("rejects a size below the family's minimum", () => {
+    expect(parseTracerouteTcpPacketSizes(39, 1400, "ipv4")).toBeNull();
+    expect(parseTracerouteTcpPacketSizes(40, 1400, "ipv6")).toBeNull();
   });
 
   test("rejects a size above the maximum", () => {
-    expect(parseTracerouteTcpPacketSizes(64, 1501)).toBeNull();
+    expect(parseTracerouteTcpPacketSizes(64, 1501, "ipv4")).toBeNull();
   });
 });
 
@@ -146,28 +158,110 @@ describe("tracerouteProtocolOfTarget", () => {
   });
 });
 
-describe("TCP fixed packet size", () => {
-  test("preserves legacy connect targets and recognizes both presets", () => {
-    expect(tcpPacketSizeOfTarget({ host: "example.com", port: 443 })).toBeUndefined();
+describe("address family", () => {
+  test("reads the family of a stored target and treats its absence as auto", () => {
+    expect(familyOfTarget({ host: "example.com" })).toBe("auto");
+    expect(familyOfTarget({ host: "example.com", family: "ipv6" })).toBe("ipv6");
+    expect(familyOfTarget({ url: "https://example.com" })).toBe("auto");
+    expect(familyOfTarget(null)).toBe("auto");
+  });
+
+  test("adds the field only for an explicit family", () => {
+    expect(withFamily({ host: "example.com" }, "auto")).toEqual({ host: "example.com" });
+    expect(withFamily({ host: "example.com" }, "ipv6")).toEqual({
+      host: "example.com",
+      family: "ipv6",
+    });
+  });
+
+  test("flags a family that contradicts an IP literal", () => {
+    expect(familyConflictsWithHost("192.0.2.1", "ipv6")).toBe(true);
+    expect(familyConflictsWithHost("2001:db8::1", "ipv4")).toBe(true);
+    expect(familyConflictsWithHost("2001:db8::1", "ipv6")).toBe(false);
+    expect(familyConflictsWithHost("example.com", "ipv6")).toBe(false);
+    expect(familyConflictsWithHost("192.0.2.1", "auto")).toBe(false);
+  });
+
+  test("raw TCP defaults to IPv4 unless the family or an IPv6 literal says otherwise", () => {
+    expect(rawTcpFamily("example.com", "auto")).toBe("ipv4");
+    expect(rawTcpFamily("example.com", "ipv6")).toBe("ipv6");
+    expect(rawTcpFamily("2001:db8::1", "auto")).toBe("ipv6");
+  });
+});
+
+describe("TCP packet size and capability support", () => {
+  test("reads any stored packet size and keeps connect targets size-less", () => {
+    expect(tcpPacketSizeOfTarget({ host: "example.com", port: 443 })).toBeNull();
     expect(tcpPacketSizeOfTarget({ host: "example.com", port: 443, packetSize: 40 })).toBe(40);
-    expect(tcpPacketSizeOfTarget({ host: "example.com", port: 443, packetSize: 1200 })).toBe(1200);
+    expect(tcpPacketSizeOfTarget({ host: "example.com", port: 443, packetSize: 1400 })).toBe(1400);
+  });
+
+  test("requires the same capabilities the server gates on", () => {
+    expect(requiredProbeCapabilities("tcp", { host: "example.com", port: 443 })).toEqual([]);
+    expect(
+      requiredProbeCapabilities("tcp", { host: "example.com", port: 443, packetSize: 1200 }),
+    ).toEqual(["tcpPacketSize"]);
+    expect(
+      requiredProbeCapabilities("tcp", {
+        host: "example.com",
+        family: "ipv6",
+        port: 443,
+        packetSize: 1500,
+      }),
+    ).toEqual(["addressFamily", "tcpPacketSize", "tcpPacketSizeRange", "tcpPacketSizeIpv6"]);
+    expect(
+      requiredProbeCapabilities("traceroute", {
+        host: "2001:db8::1",
+        protocol: "tcp",
+        port: 443,
+        packetSizes: [60, 1500],
+      }),
+    ).toEqual(["tracerouteTcpSizePair", "tracerouteTcpSizePairIpv6"]);
+    expect(requiredProbeCapabilities("traceroute", { host: "2001:db8::1" })).toEqual([
+      "tracerouteIcmpIpv6",
+    ]);
+    expect(requiredProbeCapabilities("icmp", { host: "example.com", family: "ipv6" })).toEqual([
+      "addressFamily",
+    ]);
   });
 
   test("counts only the current scope, without including stale selections from other modes", () => {
-    const agents = [
-      { id: "linux", name: "linux", group: "group", groupId: "g1", tcpPacketSizeSupported: true },
-      { id: "old", name: "old", group: "group", groupId: "g1", tcpPacketSizeSupported: false },
-      { id: "mac", name: "mac", group: null, groupId: null, tcpPacketSizeSupported: false },
+    const agents: AdminAgentOption[] = [
+      {
+        id: "linux",
+        name: "linux",
+        group: "group",
+        groupId: "g1",
+        probeCapabilities: ["addressFamily", "tcpPacketSize", "tcpPacketSizeIpv6"],
+      },
+      {
+        id: "old",
+        name: "old",
+        group: "group",
+        groupId: "g1",
+        probeCapabilities: ["tcpPacketSize"],
+      },
+      { id: "mac", name: "mac", group: null, groupId: null, probeCapabilities: ["addressFamily"] },
     ];
+    const ipv6Syn = ["tcpPacketSize", "tcpPacketSizeIpv6"] as const;
     expect(
-      tcpPacketSizeSupport(agents, { mode: "specific", agentIds: ["mac"], groupIds: ["g1"] }),
+      probeCapabilitySupport(
+        agents,
+        { mode: "specific", agentIds: ["mac"], groupIds: ["g1"] },
+        ipv6Syn,
+      ),
     ).toEqual({ total: 1, supported: 0 });
     expect(
-      tcpPacketSizeSupport(agents, { mode: "groups", agentIds: ["mac"], groupIds: ["g1"] }),
+      probeCapabilitySupport(
+        agents,
+        { mode: "groups", agentIds: ["mac"], groupIds: ["g1"] },
+        ipv6Syn,
+      ),
     ).toEqual({ total: 2, supported: 1 });
-    expect(tcpPacketSizeSupport(agents, { mode: "all", agentIds: [], groupIds: [] })).toEqual({
-      total: 3,
-      supported: 1,
-    });
+    expect(
+      probeCapabilitySupport(agents, { mode: "all", agentIds: [], groupIds: [] }, [
+        "tcpPacketSize",
+      ]),
+    ).toEqual({ total: 3, supported: 2 });
   });
 });

@@ -28,7 +28,7 @@ import {
   type AgentInventoryView,
   type PublicAgentSystemView,
 } from "../util/agent-info";
-import { capabilitySupportsTcpPacketSize } from "../util/probe-capabilities";
+import { supportedProbeCapabilities } from "../util/probe-capabilities";
 
 export type AgentLatestWire = {
   seq: number;
@@ -781,7 +781,7 @@ export class AgentRegistry {
         name: entry.name,
         group: entry.groupName,
         groupId: entry.groupId,
-        tcpPacketSizeSupported: capabilitySupportsTcpPacketSize(entry.lastCapabilities),
+        probeCapabilities: [...supportedProbeCapabilities(entry.lastCapabilities)],
       });
     }
     return out.sort((a, b) => this.compareById(a.id, b.id));

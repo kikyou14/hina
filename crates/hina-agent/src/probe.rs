@@ -1,8 +1,10 @@
+mod family;
 mod http;
 mod icmp;
 mod outcome;
 mod raw_socket;
 mod runner;
+mod sampling;
 mod task;
 mod tcp;
 mod tcp_raw;
@@ -12,10 +14,7 @@ mod tests;
 mod traceroute;
 mod traceroute_tcp;
 
-use std::{net::IpAddr, sync::Arc, time::Duration};
-
-use anyhow::Context;
-use tokio::net::lookup_host;
+use std::{sync::Arc, time::Duration};
 
 pub(crate) use icmp::IcmpClients;
 pub(crate) use runner::ApplyConfigResult;
@@ -39,13 +38,9 @@ pub(crate) async fn execute_probe(
 ) -> ProbeResultBody {
     let deadline = tokio::time::Instant::now() + spec.timeout;
     let outcome = match &spec.target {
-        ProbeTarget::Tcp {
-            host,
-            port,
-            packet_size,
-        } => tcp::probe(host, *port, *packet_size, deadline).await,
+        ProbeTarget::Tcp { host, port, mode } => tcp::probe(host, *port, *mode, deadline).await,
         ProbeTarget::Http { url } => http::probe(http_client, url.clone(), spec.timeout).await,
-        ProbeTarget::Icmp { host } => icmp::probe(icmp, host, deadline).await,
+        ProbeTarget::Icmp { host, family } => icmp::probe(icmp, host, *family, deadline).await,
         ProbeTarget::Traceroute { host, mode } => {
             let _permit = trace_serial.acquire().await;
             let trace_deadline =
@@ -91,19 +86,6 @@ pub(crate) fn permission_denied_hint() -> &'static str {
 
 pub(crate) fn remaining_until(deadline: tokio::time::Instant) -> Duration {
     deadline.saturating_duration_since(tokio::time::Instant::now())
-}
-
-async fn resolve_ip(host: &str, deadline: tokio::time::Instant) -> anyhow::Result<IpAddr> {
-    if let Ok(ip) = host.parse::<IpAddr>() {
-        return Ok(ip);
-    }
-
-    let mut addrs = tokio::time::timeout_at(deadline, lookup_host((host, 0)))
-        .await
-        .map_err(|_| anyhow::Error::msg("timeout"))?
-        .context("dns lookup failed")?;
-
-    addrs.next().map(|addr| addr.ip()).context("dns no records")
 }
 
 pub(crate) fn clamp_error(input: &str) -> String {

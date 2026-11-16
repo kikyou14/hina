@@ -598,7 +598,7 @@ test("TCP packet size survives create, edit and list, and can return to ordinary
     });
     expect(create.status).toBe(200);
     const { id } = (await create.json()) as { id: string };
-    for (const packetSize of [40, 1200, undefined]) {
+    for (const packetSize of [40, 1200, 1400, undefined]) {
       const target = {
         host: "example.com",
         port: 443,
@@ -612,11 +612,14 @@ test("TCP packet size survives create, edit and list, and can return to ordinary
       expect(update.status).toBe(200);
       const listing = await app.request("/probe-tasks");
       const body = (await listing.json()) as {
-        tasks: Array<{ target: unknown; tcpPacketSizeSupport: unknown }>;
+        tasks: Array<{ target: unknown; capabilitySupport: unknown }>;
       };
       expect(body.tasks[0]?.target).toEqual(target);
-      expect(body.tasks[0]?.tcpPacketSizeSupport).toEqual(
-        packetSize === undefined ? null : { targetAgents: 0, unsupportedAgents: 0 },
+      // Sizes beyond the original 40/1200 presets also need agents that accept any size.
+      const required =
+        packetSize === 1400 ? ["tcpPacketSize", "tcpPacketSizeRange"] : ["tcpPacketSize"];
+      expect(body.tasks[0]?.capabilitySupport).toEqual(
+        packetSize === undefined ? null : { required, targetAgents: 0, unsupportedAgents: 0 },
       );
     }
   } finally {

@@ -2,13 +2,32 @@ import { fetchJson } from "./http";
 
 export type ProbeKind = "icmp" | "tcp" | "http" | "traceroute";
 
+export type AddressFamily = "ipv4" | "ipv6";
+
 export type ProbeTaskTarget =
-  | { host: string }
-  | { host: string; port: number; packetSize?: 40 | 1200 }
-  | { host: string; protocol: "tcp"; port: number; packetSizes: [number, number] }
+  | { host: string; family?: AddressFamily }
+  | { host: string; family?: AddressFamily; port: number; packetSize?: number }
+  | {
+      host: string;
+      family?: AddressFamily;
+      protocol: "tcp";
+      port: number;
+      packetSizes: [number, number];
+    }
   | { url: string };
 
+/** Agent capability a task needs beyond the baseline probes; mirrors the server. */
+export type ProbeCapability =
+  | "addressFamily"
+  | "tcpPacketSize"
+  | "tcpPacketSizeRange"
+  | "tcpPacketSizeIpv6"
+  | "tracerouteTcpSizePair"
+  | "tracerouteTcpSizePairIpv6"
+  | "tracerouteIcmpIpv6";
+
 export type ProbeSupport = {
+  required: ProbeCapability[];
   targetAgents: number;
   unsupportedAgents: number;
 };
@@ -27,9 +46,7 @@ export type AdminProbeTask = {
   updatedAtMs: number;
   groups: Array<{ id: string; name: string }>;
   agents: Array<{ id: string; name: string }>;
-  tcpSizePairSupport?: ProbeSupport | null;
-  tracerouteIpv6Support?: ProbeSupport | null;
-  tcpPacketSizeSupport?: ProbeSupport | null;
+  capabilitySupport?: ProbeSupport | null;
 };
 
 export type AdminProbeTaskRef = {

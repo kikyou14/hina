@@ -577,6 +577,7 @@ fn default_capabilities() -> Value {
         serde_json::json!({
             "protocols": ["icmp", "tcp"],
             "tcpSizePair": true,
+            "tcpSizePairIpv6": true,
             "icmpIpv6": true,
             "resultVersions": [1, 2]
         })
@@ -584,10 +585,12 @@ fn default_capabilities() -> Value {
         serde_json::json!({
             "protocols": ["icmp"],
             "tcpSizePair": false,
+            "tcpSizePairIpv6": false,
             "icmpIpv6": true,
             "resultVersions": [1]
         })
     };
+    let raw_tcp = crate::probe::TCP_PACKET_SIZE_SUPPORTED;
 
     serde_json::json!({
         "telemetry": {
@@ -618,8 +621,13 @@ fn default_capabilities() -> Value {
             }
         },
         "probes": {
+            "family": true,
             "traceroute": traceroute,
-            "tcp": { "packetSize": crate::probe::TCP_PACKET_SIZE_SUPPORTED }
+            "tcp": {
+                "packetSize": raw_tcp,
+                "packetSizeRange": raw_tcp,
+                "packetSizeIpv6": raw_tcp
+            }
         }
     })
 }

@@ -13,10 +13,18 @@ import {
 } from "./probe-config";
 
 import {
-  capabilitySupportsTcpPacketSize,
-  capabilitySupportsTracerouteIcmpIpv6,
-  capabilitySupportsTracerouteTcpSizePair,
+  type ProbeCapability,
+  requiredProbeCapabilities,
+  supportedProbeCapabilities,
 } from "../util/probe-capabilities";
+
+function supports(cap: unknown, capability: ProbeCapability): boolean {
+  return supportedProbeCapabilities(cap).has(capability);
+}
+
+function capabilities(...names: ProbeCapability[]): Set<ProbeCapability> {
+  return new Set(names);
+}
 
 const NOW_MS = 1_700_000_000_000;
 
@@ -135,12 +143,13 @@ describe("buildProbeConfigForAgent", () => {
   });
 });
 
-describe("capabilitySupportsTracerouteTcpSizePair", () => {
+describe("tracerouteTcpSizePair capability", () => {
   test("true only when probes.traceroute.tcpSizePair is exactly true", () => {
     expect(
-      capabilitySupportsTracerouteTcpSizePair({
-        probes: { traceroute: { protocols: ["icmp", "tcp"], tcpSizePair: true } },
-      }),
+      supports(
+        { probes: { traceroute: { protocols: ["icmp", "tcp"], tcpSizePair: true } } },
+        "tracerouteTcpSizePair",
+      ),
     ).toBe(true);
   });
 
@@ -157,7 +166,7 @@ describe("capabilitySupportsTracerouteTcpSizePair", () => {
     "not an object",
     42,
   ])("false for missing/malformed capability %p", (cap) => {
-    expect(capabilitySupportsTracerouteTcpSizePair(cap)).toBe(false);
+    expect(supports(cap, "tracerouteTcpSizePair")).toBe(false);
   });
 });
 
@@ -198,7 +207,7 @@ describe("buildProbeConfigForAgent — TCP dual-size traceroute capability gatin
     const body = await buildProbeConfigForAgent(db, "a1", {
       scope,
       rev: 1,
-      supportsTracerouteTcpSizePair: false,
+      capabilities: capabilities(),
     });
 
     expect(body.tasks.map((t) => t.id).sort()).toEqual(["task-icmp"]);
@@ -211,7 +220,7 @@ describe("buildProbeConfigForAgent — TCP dual-size traceroute capability gatin
     const body = await buildProbeConfigForAgent(db, "a1", {
       scope,
       rev: 1,
-      supportsTracerouteTcpSizePair: true,
+      capabilities: capabilities("tracerouteTcpSizePair"),
     });
 
     expect(body.tasks.map((t) => t.id).sort()).toEqual(["task-icmp", "task-tcp"]);
@@ -225,7 +234,7 @@ describe("buildProbeConfigForAgent — TCP dual-size traceroute capability gatin
     const withCap = await buildProbeConfigForAgent(db, "a1", {
       scope,
       rev: 2,
-      supportsTracerouteTcpSizePair: true,
+      capabilities: capabilities("tracerouteTcpSizePair"),
     });
 
     expect(withoutCap.tasks.some((t) => t.id === "task-icmp")).toBe(true);
@@ -367,14 +376,14 @@ describe("computeProbeSupportCounts", () => {
 
 describe("TCP fixed packet size capability", () => {
   test("requires its own exact capability, not traceroute support", () => {
-    expect(capabilitySupportsTcpPacketSize({ probes: { tcp: { packetSize: true } } })).toBe(true);
+    expect(supports({ probes: { tcp: { packetSize: true } } }, "tcpPacketSize")).toBe(true);
     for (const cap of [
       null,
       {},
       { probes: { traceroute: { tcpSizePair: true } } },
       { probes: { tcp: { packetSize: "true" } } },
     ]) {
-      expect(capabilitySupportsTcpPacketSize(cap)).toBe(false);
+      expect(supports(cap, "tcpPacketSize")).toBe(false);
     }
   });
 
@@ -409,19 +418,18 @@ describe("TCP fixed packet size capability", () => {
         .insert(schema.probeTaskAgent)
         .values({ taskId: "sized", agentId: "linux", createdAtMs: NOW_MS });
       const scope = { agentId: "linux", groupId: "g1" };
-      for (const supportsTcpPacketSize of [false, undefined]) {
+      for (const advertised of [capabilities("tracerouteTcpSizePair"), undefined]) {
         const result = await buildProbeConfigForAgent(db, "linux", {
           scope,
           rev: 1,
-          supportsTracerouteTcpSizePair: true,
-          supportsTcpPacketSize,
+          capabilities: advertised,
         });
         expect(result.tasks.map((task) => task.id)).toEqual(["normal"]);
       }
       const supported = await buildProbeConfigForAgent(db, "linux", {
         scope,
         rev: 2,
-        supportsTcpPacketSize: true,
+        capabilities: capabilities("tcpPacketSize"),
       });
       expect(supported.tasks.find((task) => task.id === "sized")?.tar).toEqual({
         host: "example.com",
@@ -445,16 +453,16 @@ describe("TCP fixed packet size capability", () => {
 
 describe("ICMP IPv6 traceroute capability", () => {
   test("requires its own exact capability", () => {
-    expect(
-      capabilitySupportsTracerouteIcmpIpv6({ probes: { traceroute: { icmpIpv6: true } } }),
-    ).toBe(true);
+    expect(supports({ probes: { traceroute: { icmpIpv6: true } } }, "tracerouteIcmpIpv6")).toBe(
+      true,
+    );
     for (const cap of [
       null,
       {},
       { probes: { traceroute: { tcpSizePair: true } } },
       { probes: { traceroute: { icmpIpv6: "true" } } },
     ]) {
-      expect(capabilitySupportsTracerouteIcmpIpv6(cap)).toBe(false);
+      expect(supports(cap, "tracerouteIcmpIpv6")).toBe(false);
     }
   });
 
@@ -473,7 +481,7 @@ describe("ICMP IPv6 traceroute capability", () => {
       const capable = await buildProbeConfigForAgent(db, "a1", {
         scope,
         rev: 2,
-        supportsTracerouteIcmpIpv6: true,
+        capabilities: capabilities("tracerouteIcmpIpv6"),
       });
       expect(capable.tasks.map((t) => t.id).sort()).toEqual(["hostname", "v4", "v6"]);
     } finally {
@@ -510,6 +518,95 @@ describe("ICMP IPv6 traceroute capability", () => {
       ]);
       expect(counts.get("v6")).toEqual({ targetAgents: 2, unsupportedAgents: 1 });
       expect(counts.has("v4")).toBe(false);
+    } finally {
+      sqlite.close();
+    }
+  });
+});
+
+describe("requiredProbeCapabilities", () => {
+  test.each([
+    ["icmp", { host: "2001:db8::1" }, []],
+    ["icmp", { host: "example.com", family: "ipv6" }, ["addressFamily"]],
+    ["tcp", { host: "example.com", port: 443 }, []],
+    ["tcp", { host: "example.com", port: 443, family: "ipv6" }, ["addressFamily"]],
+    ["tcp", { host: "example.com", port: 443, packetSize: 1200 }, ["tcpPacketSize"]],
+    [
+      "tcp",
+      { host: "example.com", port: 443, packetSize: 1400 },
+      ["tcpPacketSize", "tcpPacketSizeRange"],
+    ],
+    [
+      "tcp",
+      { host: "2001:db8::1", port: 443, packetSize: 1200 },
+      ["tcpPacketSize", "tcpPacketSizeIpv6"],
+    ],
+    [
+      "tcp",
+      { host: "example.com", family: "ipv6", port: 443, packetSize: 1500 },
+      ["addressFamily", "tcpPacketSize", "tcpPacketSizeRange", "tcpPacketSizeIpv6"],
+    ],
+    ["traceroute", { host: "example.com" }, []],
+    [
+      "traceroute",
+      { host: "example.com", family: "ipv6" },
+      ["addressFamily", "tracerouteIcmpIpv6"],
+    ],
+    [
+      "traceroute",
+      { host: "2001:db8::1", protocol: "tcp", port: 443, packetSizes: [60, 1500] },
+      ["tracerouteTcpSizePair", "tracerouteTcpSizePairIpv6"],
+    ],
+    ["http", { url: "https://example.com" }, []],
+  ] as const)("%s %p needs %p", (kind, target, required) => {
+    expect(requiredProbeCapabilities(kind, target)).toEqual([...required]);
+  });
+});
+
+describe("IPv6 and family-pinned TCP gating", () => {
+  test("withholds IPv6 raw TCP and family-pinned tasks from agents that predate them", async () => {
+    const { db, sqlite } = createTestDb();
+    try {
+      await seedAgent(db, "a1", null);
+      await seedAllAgentsTask(db, "v4-sized", "tcp", {
+        host: "example.com",
+        port: 443,
+        packetSize: 40,
+      });
+      await seedAllAgentsTask(db, "v6-sized", "tcp", {
+        host: "example.com",
+        family: "ipv6",
+        port: 443,
+        packetSize: 1400,
+      });
+      await seedAllAgentsTask(db, "v6-connect", "tcp", {
+        host: "example.com",
+        family: "ipv6",
+        port: 443,
+      });
+      const scope = { agentId: "a1", groupId: null };
+
+      // What a 0.3.0 Linux agent advertises.
+      const legacy = await buildProbeConfigForAgent(db, "a1", {
+        scope,
+        rev: 1,
+        capabilities: supportedProbeCapabilities({
+          probes: { tcp: { packetSize: true }, traceroute: { tcpSizePair: true, icmpIpv6: true } },
+        }),
+      });
+      expect(legacy.tasks.map((t) => t.id)).toEqual(["v4-sized"]);
+
+      const current = await buildProbeConfigForAgent(db, "a1", {
+        scope,
+        rev: 2,
+        capabilities: supportedProbeCapabilities({
+          probes: {
+            family: true,
+            tcp: { packetSize: true, packetSizeRange: true, packetSizeIpv6: true },
+          },
+        }),
+      });
+      expect(current.tasks.map((t) => t.id).sort()).toEqual(["v4-sized", "v6-connect", "v6-sized"]);
     } finally {
       sqlite.close();
     }
