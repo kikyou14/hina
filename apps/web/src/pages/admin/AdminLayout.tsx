@@ -73,7 +73,7 @@ export function AdminLayout() {
       <ConnectionBanner status={liveStatus} />
       <header className="border-b">
         <div className="container flex h-14 items-center gap-6">
-          <Link to="/" className="font-semibold lg:w-55 lg:shrink-0">
+          <Link to="/" className="font-semibold">
             {siteName}
           </Link>
           <div className="flex min-w-0 flex-1 items-center justify-end gap-2">
@@ -95,13 +95,14 @@ export function AdminLayout() {
         </div>
       </header>
 
-      {/* The sidebar only appears from lg up: below that its 220px column would
-          squeeze every admin page on tablets. */}
+      {/* The sidebar only appears from lg up: below that it would squeeze every
+          admin page on tablets. Its column fits the longest nav label, with a
+          10rem floor so it keeps one width across languages. */}
       <nav className="border-b lg:hidden">
         <div className="container flex gap-1 overflow-x-auto py-2">{navItems}</div>
       </nav>
 
-      <div className="container grid gap-6 py-8 lg:grid-cols-[220px_1fr]">
+      <div className="container grid gap-8 py-8 lg:grid-cols-[minmax(10rem,max-content)_1fr]">
         <aside className="hidden space-y-2 lg:sticky lg:top-8 lg:block lg:self-start">
           {navItems}
         </aside>
