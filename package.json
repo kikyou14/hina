@@ -1,6 +1,6 @@
 {
   "name": "hina",
-  "version": "0.2.7",
+  "version": "0.2.8",
   "private": true,
   "description": "Distributed server monitoring system with agent, server, and web UI",
   "license": "MIT",
