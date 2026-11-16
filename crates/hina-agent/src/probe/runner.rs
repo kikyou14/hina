@@ -384,7 +384,10 @@ mod tests {
 
     use super::{ApplyConfigResult, ProbeRunner, plan_task_diff};
     use crate::{
-        probe::task::{ProbeTarget, ProbeTaskSpec},
+        probe::{
+            family::{FamilyPolicy, IpFamily},
+            task::{ProbeTarget, ProbeTaskSpec, TcpMode},
+        },
         protocol::{ProbeConfigBody, ProbeTaskKind, ProbeTaskWire},
     };
 
@@ -420,7 +423,9 @@ mod tests {
             target: ProbeTarget::Tcp {
                 host: host.to_string(),
                 port,
-                packet_size: None,
+                mode: TcpMode::Connect {
+                    family: FamilyPolicy::Auto,
+                },
             },
         }
     }
@@ -503,8 +508,11 @@ mod tests {
     fn plan_task_diff_restarts_changed_tcp_packet_size() {
         let original = tcp_spec("task-1", 5, 1000, "example.com", 443);
         let mut updated = original.clone();
-        if let ProbeTarget::Tcp { packet_size, .. } = &mut updated.target {
-            *packet_size = Some(1200);
+        if let ProbeTarget::Tcp { mode, .. } = &mut updated.target {
+            *mode = TcpMode::Syn {
+                family: IpFamily::V4,
+                packet_size: 1200,
+            };
         }
         let diff = plan_task_diff(
             &current_specs(vec![("task-1", original)]),

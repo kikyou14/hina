@@ -1,5 +1,6 @@
 import { isIP } from "node:net";
 import { isRecord } from "../../util/lang";
+import { type AddressFamily, pinnedAddressFamily } from "../../util/probe-capabilities";
 
 export { escapeLike, isRecord, safeJsonParse, uniqueStrings } from "../../util/lang";
 
@@ -11,29 +12,45 @@ function isValidHost(value: string): boolean {
   return HOSTNAME_RE.test(value);
 }
 
-function isIpv6(value: string): boolean {
-  return isIP(value) === 6;
+/** A bare SYN: the fixed IP header plus a 20-byte TCP header. */
+const MIN_TCP_PACKET_SIZE: Record<AddressFamily, number> = { ipv4: 40, ipv6: 60 };
+const MAX_TCP_PACKET_SIZE = 1500;
+
+function isValidTcpPacketSize(size: unknown, family: AddressFamily): size is number {
+  return (
+    typeof size === "number" &&
+    Number.isInteger(size) &&
+    size >= MIN_TCP_PACKET_SIZE[family] &&
+    size <= MAX_TCP_PACKET_SIZE
+  );
 }
 
-const TRACEROUTE_TCP_PACKET_SIZE_MIN = 40;
-const TRACEROUTE_TCP_PACKET_SIZE_MAX = 1500;
-
-function parseTracerouteTcpPacketSizes(value: unknown): [number, number] | null {
+function parseTracerouteTcpPacketSizes(
+  value: unknown,
+  family: AddressFamily,
+): [number, number] | null {
   if (!Array.isArray(value) || value.length !== 2) return null;
   const [a, b] = value;
-  for (const size of [a, b]) {
-    if (
-      typeof size !== "number" ||
-      !Number.isFinite(size) ||
-      !Number.isInteger(size) ||
-      size < TRACEROUTE_TCP_PACKET_SIZE_MIN ||
-      size > TRACEROUTE_TCP_PACKET_SIZE_MAX
-    ) {
-      return null;
-    }
-  }
+  if (!isValidTcpPacketSize(a, family) || !isValidTcpPacketSize(b, family)) return null;
   if (a === b) return null;
   return a < b ? [a, b] : [b, a];
+}
+
+/**
+ * `{ family }` to spread into a target, `{}` when absent, or `null` when the value is invalid or
+ * contradicts an IP literal host.
+ */
+function parseFamily(value: unknown, host: string): { family?: AddressFamily } | null {
+  if (value === undefined) return {};
+  if (value !== "ipv4" && value !== "ipv6") return null;
+  const literal = isIP(host);
+  if (literal !== 0 && literal !== (value === "ipv4" ? 4 : 6)) return null;
+  return { family: value };
+}
+
+/** Family a raw TCP probe of `target` sends over, which bounds its packet sizes. */
+function rawTcpFamily(target: { host: string; family?: AddressFamily }): AddressFamily {
+  return pinnedAddressFamily(target, true) ?? "ipv4";
 }
 
 export const MAX_NAME_LEN = 200;
@@ -141,30 +158,35 @@ export function parseTarget(
   if (kind === "icmp") {
     const host = typeof value["host"] === "string" ? value["host"].trim() : "";
     if (!host || !isValidHost(host)) return null;
-    const target = { host };
+    const family = parseFamily(value["family"], host);
+    if (!family) return null;
+    const target = { host, ...family };
     return { target, targetJson: JSON.stringify(target) };
   }
 
   if (kind === "traceroute") {
     const host = typeof value["host"] === "string" ? value["host"].trim() : "";
     if (!host || !isValidHost(host)) return null;
+    const family = parseFamily(value["family"], host);
+    if (!family) return null;
 
     const protocol = value["protocol"];
     if (protocol === undefined || protocol === "icmp") {
-      const target = { host };
+      const target = { host, ...family };
       return { target, targetJson: JSON.stringify(target) };
     }
     if (protocol !== "tcp") return null;
-    // The dual-size TCP mode crafts raw IPv4 packets.
-    if (isIpv6(host)) return null;
 
     const port = typeof value["port"] === "number" ? value["port"] : Number.NaN;
     if (!Number.isFinite(port) || !Number.isInteger(port) || port < 1 || port > 65535) return null;
 
-    const packetSizes = parseTracerouteTcpPacketSizes(value["packetSizes"]);
+    const packetSizes = parseTracerouteTcpPacketSizes(
+      value["packetSizes"],
+      rawTcpFamily({ host, ...family }),
+    );
     if (!packetSizes) return null;
 
-    const target = { host, protocol: "tcp" as const, port, packetSizes };
+    const target = { host, ...family, protocol: "tcp" as const, port, packetSizes };
     return { target, targetJson: JSON.stringify(target) };
   }
 
@@ -173,10 +195,15 @@ export function parseTarget(
     const port = typeof value["port"] === "number" ? value["port"] : Number.NaN;
     if (!host || !isValidHost(host)) return null;
     if (!Number.isFinite(port) || !Number.isInteger(port) || port < 1 || port > 65535) return null;
+    const family = parseFamily(value["family"], host);
+    if (!family) return null;
     const packetSize = value["packetSize"];
-    if (packetSize !== undefined && packetSize !== 40 && packetSize !== 1200) return null;
-    if (packetSize !== undefined && isIpv6(host)) return null;
-    const target = packetSize === undefined ? { host, port } : { host, port, packetSize };
+    if (packetSize === undefined) {
+      const target = { host, ...family, port };
+      return { target, targetJson: JSON.stringify(target) };
+    }
+    if (!isValidTcpPacketSize(packetSize, rawTcpFamily({ host, ...family }))) return null;
+    const target = { host, ...family, port, packetSize };
     return { target, targetJson: JSON.stringify(target) };
   }
 

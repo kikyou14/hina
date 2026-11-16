@@ -113,18 +113,34 @@ const PUBLIC_TCP_ERRORS = new Set([
   "connect_failed",
   "packet_too_large",
   "dest_unreachable",
+  "net_unreachable",
+  "host_unreachable",
+  "protocol_unreachable",
+  "port_unreachable",
+  "admin_prohibited",
   "ipv6_not_supported",
   "unsupported_platform",
   "dns_lookup_failed",
   "dns_no_records",
+  "dns_no_ipv4",
+  "dns_no_ipv6",
 ]);
 
-function publicTcpExtra(extraJson: string | null): { packet_size_bytes: 40 | 1200 } | null {
+type PublicTcpExtra = { packet_size_bytes?: number; family?: "ipv4" | "ipv6" };
+
+/** Only the packet size and address family; the resolved address and diagnostics stay private. */
+function publicTcpExtra(extraJson: string | null): PublicTcpExtra | null {
   if (!extraJson) return null;
   const extra = safeJsonParse(extraJson);
   if (!isRecord(extra)) return null;
+  const out: PublicTcpExtra = {};
   const size = extra["packet_size_bytes"];
-  return size === 40 || size === 1200 ? { packet_size_bytes: size } : null;
+  if (typeof size === "number" && Number.isInteger(size) && size >= 40 && size <= 1500) {
+    out.packet_size_bytes = size;
+  }
+  const family = extra["family"];
+  if (family === "ipv4" || family === "ipv6") out.family = family;
+  return Object.keys(out).length > 0 ? out : null;
 }
 
 export function formatProbeLatestResults(rows: ProbeLatestRow[], privacy: ProbeLatestPrivacy) {

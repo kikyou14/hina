@@ -79,7 +79,7 @@ describe("AgentRegistry", () => {
     expect(all.map((a) => a.id)).toEqual(["a1", "a2"]);
   });
 
-  test("agent options expose group IDs and fixed TCP support independently of traceroute", async () => {
+  test("agent options expose group IDs and the probe capabilities each agent advertised", async () => {
     await seedAgent(db, { id: "linux", name: "linux" });
     await seedAgent(db, { id: "old", name: "old" });
     await db
@@ -90,9 +90,9 @@ describe("AgentRegistry", () => {
     const options = registry.listOptionRefs();
     expect(options.find((agent) => agent.id === "linux")).toMatchObject({
       groupId: null,
-      tcpPacketSizeSupported: true,
+      probeCapabilities: ["tcpPacketSize"],
     });
-    expect(options.find((agent) => agent.id === "old")?.tcpPacketSizeSupported).toBe(false);
+    expect(options.find((agent) => agent.id === "old")?.probeCapabilities).toEqual([]);
   });
 
   test("insert() adds an entry without DB write", async () => {

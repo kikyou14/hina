@@ -11,7 +11,8 @@ import {
   probeTaskAgent,
   probeTaskGroup,
 } from "../../db/schema";
-import { computeProbeSupportCounts, requiredProbeCapability } from "../../ws/probe-config";
+import { requiredProbeCapabilities } from "../../util/probe-capabilities";
+import { computeProbeSupportCounts } from "../../ws/probe-config";
 import {
   isRecord,
   MAX_NAME_LEN,
@@ -116,8 +117,7 @@ export function registerAdminProbeTaskRoutes(router: Hono<AppContext>) {
       offset,
       tasks: tasks.map((t) => {
         const target = safeJsonParse(t.targetJson);
-        const required = requiredProbeCapability(t.kind, target);
-        const support = supportByTaskId.get(t.id) ?? null;
+        const support = supportByTaskId.get(t.id);
         return {
           id: t.id,
           name: t.name,
@@ -132,9 +132,9 @@ export function registerAdminProbeTaskRoutes(router: Hono<AppContext>) {
           updatedAtMs: t.updatedAtMs,
           groups: groupsByTaskId.get(t.id) ?? [],
           agents: agentsByTaskId.get(t.id) ?? [],
-          tcpSizePairSupport: required === "tracerouteTcpSizePair" ? support : null,
-          tracerouteIpv6Support: required === "tracerouteIcmpIpv6" ? support : null,
-          tcpPacketSizeSupport: required === "tcpPacketSize" ? support : null,
+          capabilitySupport: support
+            ? { required: requiredProbeCapabilities(t.kind, target), ...support }
+            : null,
         };
       }),
     });

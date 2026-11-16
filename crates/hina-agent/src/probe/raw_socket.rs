@@ -5,11 +5,21 @@ use std::{
 };
 use tokio::io::unix::AsyncFd;
 
-const IP_HEADER_MIN_LEN: usize = 20;
+use super::family::IpFamily;
 
-/// Strip the outer IP header from a RAW socket received buffer to get the ICMP payload.
-pub(crate) fn strip_ip_header(buf: &[u8]) -> &[u8] {
-    if buf.len() < IP_HEADER_MIN_LEN {
+const IPV4_HEADER_MIN_LEN: usize = 20;
+
+/// The transport header onward of a datagram read from a raw socket of `family`: IPv4 raw sockets
+/// deliver the IP header, IPv6 raw sockets never do.
+pub(crate) fn transport_payload(family: IpFamily, buf: &[u8]) -> &[u8] {
+    match family {
+        IpFamily::V4 => strip_ipv4_header(buf),
+        IpFamily::V6 => buf,
+    }
+}
+
+fn strip_ipv4_header(buf: &[u8]) -> &[u8] {
+    if buf.len() < IPV4_HEADER_MIN_LEN {
         return &[];
     }
     let ihl = (buf[0] & 0x0F) as usize * 4;
@@ -65,11 +75,4 @@ pub(crate) async fn probe_origin_addr(target_ip: IpAddr) -> Option<IpAddr> {
     let socket = tokio::net::UdpSocket::bind((bind_ip, 0)).await.ok()?;
     socket.connect((target_ip, 33434)).await.ok()?;
     socket.local_addr().ok().map(|local| local.ip())
-}
-
-pub(crate) async fn probe_origin_ip(target_ip: Ipv4Addr) -> Option<Ipv4Addr> {
-    match probe_origin_addr(IpAddr::V4(target_ip)).await? {
-        IpAddr::V4(v4) => Some(v4),
-        IpAddr::V6(_) => None,
-    }
 }

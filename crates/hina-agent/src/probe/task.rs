@@ -9,21 +9,41 @@ use url::Url;
 
 use crate::protocol::{ProbeTaskKind, ProbeTaskWire};
 
+use super::{
+    family::{FamilyPolicy, IpFamily},
+    tcp_raw::{MAX_PACKET_SIZE, min_packet_size},
+};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum TcpMode {
+    /// Full handshake through the OS stack; reports reachability and handshake time.
+    Connect { family: FamilyPolicy },
+    /// Raw SYNs of an exact IP packet size; reports latency, loss and jitter.
+    Syn { family: IpFamily, packet_size: u16 },
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum TracerouteMode {
-    Icmp,
-    TcpSizePair { port: u16, packet_sizes: [u16; 2] },
+    Icmp {
+        family: FamilyPolicy,
+    },
+    TcpSizePair {
+        family: IpFamily,
+        port: u16,
+        packet_sizes: [u16; 2],
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum ProbeTarget {
     Icmp {
         host: String,
+        family: FamilyPolicy,
     },
     Tcp {
         host: String,
         port: u16,
-        packet_size: Option<u16>,
+        mode: TcpMode,
     },
     Http {
         url: Url,
@@ -33,9 +53,6 @@ pub(crate) enum ProbeTarget {
         mode: TracerouteMode,
     },
 }
-
-pub(crate) const TRACEROUTE_TCP_MIN_PACKET_SIZE: u16 = 40;
-pub(crate) const TRACEROUTE_TCP_MAX_PACKET_SIZE: u16 = 1500;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ProbeTaskSpec {
@@ -103,39 +120,33 @@ pub(crate) fn parse_task(task: &ProbeTaskWire) -> anyhow::Result<ProbeTaskSpec> 
     let timeout = Duration::from_millis(timeout_ms);
 
     let target = match task.kind {
-        ProbeTaskKind::Icmp => ProbeTarget::Icmp {
-            host: extract_host(&task.target)?,
-        },
-        ProbeTaskKind::Traceroute => ProbeTarget::Traceroute {
-            host: extract_host(&task.target)?,
-            mode: parse_traceroute_mode(&task.target)?,
-        },
+        ProbeTaskKind::Icmp => {
+            let host = extract_host(&task.target)?;
+            let family = FamilyPolicy::parse(&task.target, &host)?;
+            ProbeTarget::Icmp { host, family }
+        }
+        ProbeTaskKind::Traceroute => {
+            let host = extract_host(&task.target)?;
+            let family = FamilyPolicy::parse(&task.target, &host)?;
+            let mode = parse_traceroute_mode(&task.target, family)?;
+            ProbeTarget::Traceroute { host, mode }
+        }
         ProbeTaskKind::Tcp => {
             let host = extract_host(&task.target)?;
-            let port_u64 = task
-                .target
-                .get("port")
-                .and_then(Value::as_u64)
-                .context("missing target.port")?;
-            let port = u16::try_from(port_u64).context("invalid target.port")?;
-            if port == 0 {
-                anyhow::bail!("invalid target.port");
-            }
-            let packet_size = match task.target.get("packetSize") {
-                None => None,
-                Some(value) => match value.as_u64() {
-                    Some(size @ (40 | 1200)) => Some(size as u16),
-                    _ => anyhow::bail!("target.packetSize must be 40 or 1200"),
-                },
+            let port = parse_port(&task.target)?;
+            let family = FamilyPolicy::parse(&task.target, &host)?;
+            // A packet size selects raw SYN mode, as it did before `family` existed.
+            let mode = match task.target.get("packetSize") {
+                None => TcpMode::Connect { family },
+                Some(value) => {
+                    let family = family.raw_tcp_family();
+                    TcpMode::Syn {
+                        family,
+                        packet_size: parse_packet_size(value, family)?,
+                    }
+                }
             };
-            if packet_size.is_some() && host.parse::<std::net::Ipv6Addr>().is_ok() {
-                anyhow::bail!("TCP packet size probes require IPv4");
-            }
-            ProbeTarget::Tcp {
-                host,
-                port,
-                packet_size,
-            }
+            ProbeTarget::Tcp { host, port, mode }
         }
         ProbeTaskKind::Http => {
             let url_str = task
@@ -161,23 +172,17 @@ pub(crate) fn parse_task(task: &ProbeTaskWire) -> anyhow::Result<ProbeTaskSpec> 
     })
 }
 
-fn parse_traceroute_mode(target: &Value) -> anyhow::Result<TracerouteMode> {
+fn parse_traceroute_mode(target: &Value, family: FamilyPolicy) -> anyhow::Result<TracerouteMode> {
     let protocol = target
         .get("protocol")
         .and_then(Value::as_str)
         .map(str::trim);
 
     match protocol {
-        None | Some("") | Some("icmp") => Ok(TracerouteMode::Icmp),
+        None | Some("") | Some("icmp") => Ok(TracerouteMode::Icmp { family }),
         Some("tcp") => {
-            let port_u64 = target
-                .get("port")
-                .and_then(Value::as_u64)
-                .context("missing target.port")?;
-            let port = u16::try_from(port_u64)
-                .ok()
-                .filter(|port| *port != 0)
-                .context("invalid target.port")?;
+            let port = parse_port(target)?;
+            let family = family.raw_tcp_family();
 
             let sizes = target
                 .get("packetSizes")
@@ -187,27 +192,46 @@ fn parse_traceroute_mode(target: &Value) -> anyhow::Result<TracerouteMode> {
                 anyhow::bail!("target.packetSizes must contain exactly two sizes");
             }
 
-            let mut packet_sizes = [0u16; 2];
-            for (index, value) in sizes.iter().enumerate() {
-                let raw = value.as_u64().context("invalid packet size")?;
-                let size = u16::try_from(raw).context("invalid packet size")?;
-                if !(TRACEROUTE_TCP_MIN_PACKET_SIZE..=TRACEROUTE_TCP_MAX_PACKET_SIZE)
-                    .contains(&size)
-                {
-                    anyhow::bail!("packet size out of range");
-                }
-                packet_sizes[index] = size;
-            }
-
+            let mut packet_sizes = [
+                parse_packet_size(&sizes[0], family)?,
+                parse_packet_size(&sizes[1], family)?,
+            ];
             if packet_sizes[0] == packet_sizes[1] {
                 anyhow::bail!("packet sizes must differ");
             }
             packet_sizes.sort_unstable();
 
-            Ok(TracerouteMode::TcpSizePair { port, packet_sizes })
+            Ok(TracerouteMode::TcpSizePair {
+                family,
+                port,
+                packet_sizes,
+            })
         }
         Some(other) => anyhow::bail!("unsupported traceroute protocol: {other}"),
     }
+}
+
+fn parse_port(target: &Value) -> anyhow::Result<u16> {
+    let port = target
+        .get("port")
+        .and_then(Value::as_u64)
+        .context("missing target.port")?;
+    u16::try_from(port)
+        .ok()
+        .filter(|port| *port != 0)
+        .context("invalid target.port")
+}
+
+/// Total IP packet size, from a bare SYN of `family` up to `MAX_PACKET_SIZE`.
+fn parse_packet_size(value: &Value, family: IpFamily) -> anyhow::Result<u16> {
+    let size = value
+        .as_u64()
+        .and_then(|size| u16::try_from(size).ok())
+        .context("invalid packet size")?;
+    if !(min_packet_size(family)..=MAX_PACKET_SIZE).contains(&size) {
+        anyhow::bail!("packet size out of range");
+    }
+    Ok(size)
 }
 
 fn extract_host(target: &Value) -> anyhow::Result<String> {

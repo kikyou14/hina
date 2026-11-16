@@ -125,10 +125,13 @@ describe("public TCP probe diagnostics", () => {
     "connect_failed",
     "packet_too_large",
     "dest_unreachable",
+    "host_unreachable",
+    "admin_prohibited",
     "ipv6_not_supported",
     "unsupported_platform",
     "dns_lookup_failed",
     "dns_no_records",
+    "dns_no_ipv6",
   ])("exposes known error %s", (err) => {
     expect(formatProbeLatestResults([{ ...row, err }], "anonymized")[0]?.latest.err).toBe(err);
   });
@@ -145,7 +148,9 @@ describe("public TCP probe diagnostics", () => {
     "{private",
     "[]",
     '{"packet_size_bytes":"1200"}',
-    '{"packet_size_bytes":44}',
+    '{"packet_size_bytes":39}',
+    '{"packet_size_bytes":1501}',
+    '{"family":"ipv7"}',
     '{"host":"private.example"}',
   ])("does not leak malformed or unrelated metadata %s", (extraJson) => {
     const latest = formatProbeLatestResults([{ ...row, extraJson }], "anonymized")[0]!.latest;
@@ -153,6 +158,24 @@ describe("public TCP probe diagnostics", () => {
     expect(latest.extraRawJson).toBeNull();
     expect(latest.extraParseError).toBe(false);
     expect(latest.err).toBe("packet_too_large");
+  });
+
+  it("exposes the family of an IPv6 series but not the address it resolved", () => {
+    const extraJson = JSON.stringify({
+      kind: "tcp",
+      family: "ipv6",
+      addr: "[2001:db8::10]:443",
+      packet_size_bytes: 1400,
+      sent: 5,
+      received: 4,
+    });
+    const result = formatProbeLatestResults(
+      [{ ...row, ok: true, latMs: 180, lossPct: 20, err: null, extraJson }],
+      "anonymized",
+    )[0]!;
+    expect(result.latest.extra).toEqual({ packet_size_bytes: 1400, family: "ipv6" });
+    expect(result.latest.lossPct).toBe(20);
+    expect(JSON.stringify(result)).not.toContain("2001:db8");
   });
 
   it("keeps success metadata but never displays a stale error on success", () => {

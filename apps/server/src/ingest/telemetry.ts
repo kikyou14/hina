@@ -34,11 +34,11 @@ function toDayYyyyMmDdUtc(tsMs: number): number {
   return yyyy * 10000 + mm * 100 + dd;
 }
 
-function safeDelta(current: number, previous: number): number {
+function counterDelta(current: number, previous: number, rebooted: boolean): number {
   if (!Number.isSafeInteger(current) || !Number.isSafeInteger(previous)) return 0;
   if (current < 0 || previous < 0) return 0;
-  if (current >= previous) return current - previous;
-  return current;
+  if (rebooted) return current;
+  return current >= previous ? current - previous : 0;
 }
 
 function extractNumericMetrics(input: Record<string, unknown>): Record<string, number> {
@@ -147,6 +147,7 @@ async function applyTrafficDelta(
 
   const existing = await tx
     .select({
+      lastTsMs: trafficCounter.lastTsMs,
       lastRx: trafficCounter.lastRxBytesTotal,
       lastTx: trafficCounter.lastTxBytesTotal,
     })
@@ -166,8 +167,10 @@ async function applyTrafficDelta(
   }
 
   const prev = existing[0]!;
-  const deltaRx = safeDelta(args.rxBytesTotal, prev.lastRx);
-  const deltaTx = safeDelta(args.txBytesTotal, prev.lastTx);
+  // The host booted after the baseline sample was received.
+  const rebooted = args.uptimeSec !== null && args.uptimeSec * 1000 < nowMs - prev.lastTsMs;
+  const deltaRx = counterDelta(args.rxBytesTotal, prev.lastRx, rebooted);
+  const deltaTx = counterDelta(args.txBytesTotal, prev.lastTx, rebooted);
 
   await tx
     .update(trafficCounter)

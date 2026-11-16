@@ -1,7 +1,7 @@
 use std::{
     collections::{HashMap, HashSet},
     io,
-    net::{IpAddr, Ipv4Addr, SocketAddr},
+    net::{IpAddr, SocketAddr},
     sync::Arc,
     time::Duration,
 };
@@ -10,16 +10,18 @@ use serde_json::Value;
 use socket2::{Domain, Protocol, Socket, Type};
 use tokio::{
     io::unix::AsyncFd,
-    net::lookup_host,
     sync::Semaphore,
     task::{JoinSet, spawn_blocking},
 };
 
-pub(crate) use super::raw_socket::{
-    async_recv_from, async_send_to, probe_origin_addr, probe_origin_ip, strip_ip_header,
+use super::{
+    clamp_error,
+    family::{FamilyPolicy, IpFamily, ResolveError, resolve},
+    outcome::ProbeOutcome,
+    raw_socket::{async_recv_from, async_send_to, probe_origin_addr, transport_payload},
+    remaining_until,
+    task::TracerouteMode,
 };
-
-use super::{clamp_error, outcome::ProbeOutcome, remaining_until, task::TracerouteMode};
 
 pub(crate) const TRACEROUTE_START_TTL: u8 = 1;
 pub(crate) const TRACEROUTE_MAX_HOPS: u8 = 30;
@@ -75,21 +77,36 @@ pub(crate) struct TracerouteProbeError {
     pub(crate) detail: String,
 }
 
+impl From<ResolveError> for TracerouteProbeError {
+    fn from(err: ResolveError) -> Self {
+        Self {
+            code: err.code,
+            detail: err.detail,
+        }
+    }
+}
+
 pub(crate) async fn probe(
     target: &str,
     mode: &TracerouteMode,
     deadline: tokio::time::Instant,
 ) -> ProbeOutcome {
     match mode {
-        TracerouteMode::Icmp => probe_icmp(target, deadline).await,
-        TracerouteMode::TcpSizePair { port, packet_sizes } => {
-            super::traceroute_tcp::probe(target, *port, *packet_sizes, deadline).await
-        }
+        TracerouteMode::Icmp { family } => probe_icmp(target, *family, deadline).await,
+        TracerouteMode::TcpSizePair {
+            family,
+            port,
+            packet_sizes,
+        } => super::traceroute_tcp::probe(target, *family, *port, *packet_sizes, deadline).await,
     }
 }
 
-async fn probe_icmp(target: &str, deadline: tokio::time::Instant) -> ProbeOutcome {
-    match run_traceroute(target, deadline).await {
+async fn probe_icmp(
+    target: &str,
+    family: FamilyPolicy,
+    deadline: tokio::time::Instant,
+) -> ProbeOutcome {
+    match run_traceroute(target, family, deadline).await {
         Ok(result) => {
             let outcome = if result.destination_reached {
                 ProbeOutcome::success(0).with_latency(result.latency_ms)
@@ -111,9 +128,10 @@ struct TracerouteRunOutcome {
 
 async fn run_traceroute(
     target: &str,
+    family: FamilyPolicy,
     deadline: tokio::time::Instant,
 ) -> Result<TracerouteRunOutcome, TracerouteProbeError> {
-    let target_ip = resolve_traceroute_ip(target, deadline).await?;
+    let target_ip = resolve_traceroute_ip(target, family, deadline).await?;
 
     let overall_timeout = remaining_until(deadline);
     if overall_timeout.is_zero() {
@@ -351,12 +369,7 @@ async fn probe_one_hop(
         };
 
         let rtt = send_time.elapsed();
-        // IPv4 raw sockets deliver the IP header; IPv6 raw sockets never do.
-        let icmp_data = if v6 {
-            &buf[..n]
-        } else {
-            strip_ip_header(&buf[..n])
-        };
+        let icmp_data = transport_payload(IpFamily::of(target_ip), &buf[..n]);
 
         match classify_reply(icmp_data, v6, ident, seq) {
             Some(ReplyKind::EchoReply) => {
@@ -471,90 +484,24 @@ fn icmp_checksum(data: &[u8]) -> u16 {
 
 async fn resolve_traceroute_ip(
     host: &str,
+    family: FamilyPolicy,
     deadline: tokio::time::Instant,
 ) -> Result<IpAddr, TracerouteProbeError> {
-    if let Ok(ip) = host.parse::<IpAddr>() {
-        return Ok(ip);
-    }
-
-    let addrs = lookup_traceroute_host(host, deadline).await?;
+    let addrs = resolve(host, family, deadline).await?;
     pick_traceroute_addr(&addrs).ok_or_else(|| TracerouteProbeError {
         code: "dns_no_records",
         detail: "no address records found".to_string(),
     })
 }
 
-/// Dual-stack hosts keep tracing over IPv4, as they did before IPv6 support; IPv6 is used only
-/// when the host has no A record.
+/// Dual-stack hosts keep tracing over IPv4, as they did before IPv6 support, unless `family` asks
+/// for IPv6; IPv6 is used when the host has no A record.
 fn pick_traceroute_addr(addrs: &[IpAddr]) -> Option<IpAddr> {
     addrs
         .iter()
         .find(|ip| ip.is_ipv4())
         .or(addrs.first())
         .copied()
-}
-
-async fn lookup_traceroute_host(
-    host: &str,
-    deadline: tokio::time::Instant,
-) -> Result<Vec<IpAddr>, TracerouteProbeError> {
-    let addrs = tokio::time::timeout_at(deadline, lookup_host((host, 0)))
-        .await
-        .map_err(|_| TracerouteProbeError {
-            code: "timeout",
-            detail: "dns lookup timeout".to_string(),
-        })?
-        .map_err(|err| TracerouteProbeError {
-            code: "dns_error",
-            detail: err.to_string(),
-        })?;
-    Ok(addrs.map(|addr| addr.ip()).collect())
-}
-
-pub(crate) async fn resolve_traceroute_ipv4(
-    host: &str,
-    deadline: tokio::time::Instant,
-) -> Result<Ipv4Addr, TracerouteProbeError> {
-    if let Ok(ip) = host.parse::<IpAddr>() {
-        return match ip {
-            IpAddr::V4(v4) => Ok(v4),
-            IpAddr::V6(_) => Err(TracerouteProbeError {
-                code: "ipv6_not_supported",
-                detail: "IPv6 targets are not supported".to_string(),
-            }),
-        };
-    }
-
-    let addrs = lookup_traceroute_host(host, deadline).await?;
-
-    let mut first_v4 = None;
-    let mut has_v6 = false;
-    for ip in addrs {
-        match ip {
-            IpAddr::V4(v4) => {
-                if first_v4.is_none() {
-                    first_v4 = Some(v4);
-                }
-            }
-            IpAddr::V6(_) => has_v6 = true,
-        }
-    }
-
-    if let Some(v4) = first_v4 {
-        return Ok(v4);
-    }
-
-    if has_v6 {
-        Err(TracerouteProbeError {
-            code: "ipv6_not_supported",
-            detail: "no IPv4 records found (IPv6 only)".to_string(),
-        })
-    } else {
-        Err(TracerouteProbeError {
-            code: "dns_no_ipv4",
-            detail: "no IPv4 records found".to_string(),
-        })
-    }
 }
 
 fn reverse_dns_blocking(ip: IpAddr) -> Option<String> {
@@ -898,17 +845,21 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn only_icmp_mode_accepts_ipv6_literals() {
+    async fn traceroute_resolution_honors_the_family_policy() {
         let deadline = tokio::time::Instant::now() + Duration::from_secs(1);
         let v6: IpAddr = "2001:db8::1".parse().unwrap();
 
-        assert_eq!(
-            resolve_traceroute_ip("2001:db8::1", deadline).await.ok(),
-            Some(v6)
-        );
-        let err = resolve_traceroute_ipv4("2001:db8::1", deadline)
+        for family in [FamilyPolicy::Auto, FamilyPolicy::Only(IpFamily::V6)] {
+            assert_eq!(
+                resolve_traceroute_ip("2001:db8::1", family, deadline)
+                    .await
+                    .ok(),
+                Some(v6)
+            );
+        }
+        let err = resolve_traceroute_ip("2001:db8::1", FamilyPolicy::Only(IpFamily::V4), deadline)
             .await
             .unwrap_err();
-        assert_eq!(err.code, "ipv6_not_supported");
+        assert_eq!(err.code, "dns_no_ipv4");
     }
 }

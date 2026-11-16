@@ -63,8 +63,29 @@ describe("parseTarget traceroute — TCP dual-size mode", () => {
     expect(result!.target).toMatchObject({ packetSizes: [64, 1400] });
   });
 
-  test("rejects an IPv6 host even in TCP mode", () => {
-    expect(parseTarget("traceroute", tcpTarget({ host: "2001:db8::1" }))).toBeNull();
+  test("accepts IPv6 from a bare SYN of 60 bytes", () => {
+    const literal = parseTarget(
+      "traceroute",
+      tcpTarget({ host: "2001:db8::1", packetSizes: [60, 1500] }),
+    );
+    expect(literal!.target).toMatchObject({ host: "2001:db8::1", packetSizes: [60, 1500] });
+    const pinned = parseTarget(
+      "traceroute",
+      tcpTarget({ family: "ipv6", packetSizes: [1500, 60] }),
+    );
+    expect(pinned!.target).toEqual({
+      host: "example.com",
+      family: "ipv6",
+      protocol: "tcp",
+      port: 443,
+      packetSizes: [60, 1500],
+    });
+    expect(
+      parseTarget("traceroute", tcpTarget({ host: "2001:db8::1", packetSizes: [40, 1500] })),
+    ).toBeNull();
+    expect(
+      parseTarget("traceroute", tcpTarget({ family: "ipv6", packetSizes: [59, 1500] })),
+    ).toBeNull();
   });
 
   test("rejects a missing port", () => {
@@ -131,19 +152,55 @@ describe("parseTarget traceroute — TCP dual-size mode", () => {
 });
 
 describe("parseTarget TCP packet size", () => {
-  test.each([40, 1200])("round-trips preset %p", (packetSize) => {
+  test.each([40, 44, 1200, 1500])("round-trips IPv4 size %p", (packetSize) => {
     const target = { host: "example.com", port: 443, packetSize };
     expect(parseTarget("tcp", target)?.target).toEqual(target);
     expect(JSON.parse(parseTarget("tcp", target)!.targetJson)).toEqual(target);
   });
 
-  test.each([44, 0, 1200.5, "40", null])("rejects invalid preset %p", (packetSize) => {
+  test.each([39, 1501, 0, 1200.5, "40", null])("rejects invalid size %p", (packetSize) => {
     expect(parseTarget("tcp", { host: "example.com", port: 443, packetSize })).toBeNull();
   });
 
-  test("preserves ordinary IPv6 TCP while rejecting sized IPv6", () => {
-    const target = { host: "::1", port: 443 };
-    expect(parseTarget("tcp", target)?.target).toEqual(target);
-    expect(parseTarget("tcp", { ...target, packetSize: 40 })).toBeNull();
+  test("bounds IPv6 sizes by its 40-byte header", () => {
+    expect(parseTarget("tcp", { host: "::1", port: 443 })?.target).toEqual({
+      host: "::1",
+      port: 443,
+    });
+    expect(parseTarget("tcp", { host: "::1", port: 443, packetSize: 40 })).toBeNull();
+    expect(parseTarget("tcp", { host: "::1", port: 443, packetSize: 60 })?.target).toEqual({
+      host: "::1",
+      port: 443,
+      packetSize: 60,
+    });
+    const pinned = { host: "example.com", family: "ipv6", port: 443, packetSize: 1400 };
+    expect(parseTarget("tcp", pinned)?.target).toEqual(pinned);
+    expect(parseTarget("tcp", { ...pinned, packetSize: 59 })).toBeNull();
+  });
+});
+
+describe("parseTarget address family", () => {
+  test.each(["icmp", "tcp", "traceroute"] as const)("%s keeps a valid family", (kind) => {
+    const result = parseTarget(kind, { host: "example.com", port: 443, family: "ipv6" });
+    expect(result?.target).toMatchObject({ host: "example.com", family: "ipv6" });
+  });
+
+  test.each(["v6", 6, null, ""])("rejects family %p", (family) => {
+    expect(parseTarget("icmp", { host: "example.com", family })).toBeNull();
+  });
+
+  test("rejects a family that contradicts an IP literal host", () => {
+    expect(parseTarget("icmp", { host: "192.0.2.1", family: "ipv6" })).toBeNull();
+    expect(parseTarget("tcp", { host: "2001:db8::1", port: 443, family: "ipv4" })).toBeNull();
+    expect(parseTarget("icmp", { host: "2001:db8::1", family: "ipv6" })?.target).toEqual({
+      host: "2001:db8::1",
+      family: "ipv6",
+    });
+  });
+
+  test("omits the field when absent, keeping legacy targets unchanged", () => {
+    expect(parseTarget("tcp", { host: "example.com", port: 443 })!.targetJson).toBe(
+      '{"host":"example.com","port":443}',
+    );
   });
 });
